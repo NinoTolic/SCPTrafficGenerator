@@ -21,7 +21,7 @@ jobs:
 
     - name: Unpack the Zip
       run: |
-        7z x .\SCP-Windows-493_304.zip
+        7z x ./SCP-Windows-493_304.zip
 
     - name: Install Windows application
       run: |
