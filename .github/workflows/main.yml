@@ -25,11 +25,11 @@ jobs:
 
     - name: Deploy OPG Policy
       run: |
-        Copy-Item -Path .\SCPPolicy.opg -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
+        Copy-Item -Path ./SCPPolicy.opg -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
 
     - name: Install Root CA
       run: |
-        Import-Certificate .\CA_MFE_Tenant.pem -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
+        Import-Certificate ./CA_MFE_Tenant.pem -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
 
     - name: Access top websites from external list
       shell: pwsh
