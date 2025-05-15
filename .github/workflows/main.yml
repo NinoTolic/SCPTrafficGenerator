@@ -19,6 +19,10 @@ jobs:
         token: ${{ secrets.SCPTesterToken }}
         path: SCPTesterFiles
 
+    - name: Unpack the Zip
+      run: |
+        7z x .\SCP-Windows-493_304.zip
+
     - name: Install Windows application
       run: |
         Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
