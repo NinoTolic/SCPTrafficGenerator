@@ -9,12 +9,9 @@ jobs:
   secure-deployment:
     runs-on: windows-latest
     env:
-      PRIVATE_REPO: NinoTolic/SCPTesterFiles  # Update with your private repo name
+      PRIVATE_REPO: NinoTolic/SCPTesterFiles
 
     steps:
-    - name: Checkout main repo
-      uses: actions/checkout@v4
-
     - name: Checkout private resources
       uses: actions/checkout@v4
       with:
