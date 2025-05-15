@@ -10,6 +10,7 @@ jobs:
     runs-on: windows-latest
     env:
       PRIVATE_REPO: NinoTolic/SCPTesterFiles
+      PAT: ${{ secrets.SCPTesterToken }}
 
     steps:
     - name: Checkout private resources
@@ -18,6 +19,12 @@ jobs:
         repository: ${{ env.PRIVATE_REPO }}
         token: ${{ secrets.SCPTesterToken }}
         path: SCPTesterFiles
+    
+    - name: Copy Files Over from Repo
+      run: |
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCP-Windows-493_304.zip -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Windows-493_304.zip
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
 
     - name: Unpack the Zip
       run: |
