@@ -25,7 +25,7 @@ jobs:
 
     - name: Deploy OPG Policy
       run: |
-        Copy-Item -Path ./SCPPolicy.opg -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
+        Copy-Item -Path PRIVATE_REPO/SCPPolicy.opg -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
 
     - name: Install Root CA
       run: |
