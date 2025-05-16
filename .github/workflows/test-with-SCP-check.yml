@@ -1,1 +1,79 @@
+name: SCP Traffic Generation
 
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2:00 AM UTC
+  workflow_dispatch:
+
+jobs:
+  secure-deployment:
+    runs-on: windows-latest
+    env:
+      PRIVATE_REPO: NinoTolic/SCPTesterFiles
+      PAT2: ${{ secrets.SCPTesterToken }}
+
+    steps:
+    - name: Checkout private resources
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.PRIVATE_REPO }}
+        token: ${{ secrets.SCPTesterToken }}
+        path: SCPTesterFiles
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Copy Files Over from Private Repo
+      env:
+        PAT: ${{ secrets.NewSCPToken }}
+      run: |
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCP-Windows-493_304.zip -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Windows-493_304.zip
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+
+    - name: Unpack the SCP Zip
+      run: |
+        7z x ./SCP-Windows-493_304.zip
+
+    - name: Install Windows SCP application
+      run: |
+        Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
+
+    - name: Deploy OPG Policy
+      run: |
+        Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
+
+    - name: Install Root CA
+      run: |
+        Import-Certificate "./CA_MFE_Tenant.pem" -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
+
+    - name: Check SCP Connection Status
+  id: check_scp
+  shell: pwsh
+  run: |
+    $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
+    $valueName = "Connection Status"
+    
+    try {
+        $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
+        if ($status -eq "Connected") {
+            echo "is_connected=true" >> $env:GITHUB_OUTPUT
+        } else {
+            echo "is_connected=false" >> $env:GITHUB_OUTPUT
+        }
+    } catch {
+        echo "is_connected=false" >> $env:GITHUB_OUTPUT
+    }
+
+- name: Access top websites from external list
+  if: steps.check_scp.outputs.is_connected == 'true'
+  shell: pwsh
+  run: |
+    $topSites = Get-Content "./data/top-sites.json" | ConvertFrom-Json
+    $selected = Get-Random -InputObject $topSites -Count 30
+    
+    foreach ($site in $selected) {
+        Start-Process "chromedriver.exe" $site
+        Start-Sleep -Seconds 10
+    }
+        }  
