@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
     env:
       PRIVATE_REPO: NinoTolic/SCPTesterFiles
-      PAT: ${{ secrets.SCPTesterToken }}
+      PAT2: ${{ secrets.SCPTesterToken }}
 
     steps:
     - name: Checkout private resources
