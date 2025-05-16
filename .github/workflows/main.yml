@@ -48,7 +48,7 @@ jobs:
       shell: pwsh
       run: |
         # Load the list of URLs from the JSON file
-        $topSites = Get-Content "./top-sites.json" | ConvertFrom-Json
+        $topSites = Get-Content "SCPTrafficGenerator/top-sites.json" | ConvertFrom-Json
 
         # Select 30 random URLs
         $selected = Get-Random -InputObject $topSites -Count 30
