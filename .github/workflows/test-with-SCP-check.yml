@@ -46,32 +46,32 @@ jobs:
         Import-Certificate "./CA_MFE_Tenant.pem" -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
 
     - name: Check SCP Connection Status
-  id: check_scp
-  shell: pwsh
-  run: |
-    $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
-    $valueName = "Connection Status"
-    
-    try {
-        $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
-        if ($status -eq "Connected") {
-            echo "is_connected=true" >> $env:GITHUB_OUTPUT
-        } else {
+      id: check_scp
+      shell: pwsh
+      run: |
+        $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
+        $valueName = "Connection Status"
+        
+        try {
+            $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
+            if ($status -eq "Connected") {
+                echo "is_connected=true" >> $env:GITHUB_OUTPUT
+            } else {
+                echo "is_connected=false" >> $env:GITHUB_OUTPUT
+            }
+        } catch {
             echo "is_connected=false" >> $env:GITHUB_OUTPUT
         }
-    } catch {
-        echo "is_connected=false" >> $env:GITHUB_OUTPUT
-    }
 
-- name: Access top websites from external list
-  if: steps.check_scp.outputs.is_connected == 'true'
-  shell: pwsh
-  run: |
-    $topSites = Get-Content "./data/top-sites.json" | ConvertFrom-Json
-    $selected = Get-Random -InputObject $topSites -Count 30
-    
-    foreach ($site in $selected) {
-        Start-Process "chromedriver.exe" $site
-        Start-Sleep -Seconds 10
-    }
-        }  
+    - name: Access top websites from external list
+      if: steps.check_scp.outputs.is_connected == 'true'
+      shell: pwsh
+      run: |
+        $topSites = Get-Content "./data/top-sites.json" | ConvertFrom-Json
+        $selected = Get-Random -InputObject $topSites -Count 30
+        
+        foreach ($site in $selected) {
+            Start-Process "chromedriver.exe" $site
+            Start-Sleep -Seconds 10
+        }
+            }
