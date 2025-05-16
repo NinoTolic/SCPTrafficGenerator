@@ -58,6 +58,6 @@ jobs:
 
         # Open each site in Chrome (or Edge)
         foreach ($site in $selected) {
-          Start-Process "chrome.exe" $site
+          Start-Process "chromedriver.exe" $site
           Start-Sleep -Seconds 10
         }  
