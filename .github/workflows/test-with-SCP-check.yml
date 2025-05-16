@@ -45,6 +45,9 @@ jobs:
       run: |
         Import-Certificate "./CA_MFE_Tenant.pem" -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
 
+    - name: Wait after CA installation
+      run: Start-Sleep -Seconds 10
+      
     - name: Check SCP Connection Status
       id: check_scp
       shell: pwsh
