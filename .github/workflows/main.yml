@@ -59,5 +59,10 @@ jobs:
         # Open each site in Chrome (or Edge)
         foreach ($site in $selected) {
           Start-Process "chrome.exe" "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site"
-          Start-Sleep -Seconds 10
+          Start-Sleep -Seconds 5
         }  
+    - name: Terminate Chrome processes
+      if: always()  # Runs even if previous step failed
+      shell: pwsh
+      run: |
+        Get-Process -Name "chrome" -ErrorAction SilentlyContinue | Stop-Process -Force
