@@ -1,4 +1,4 @@
-name: SCP Traffic Generation
+name: SCP Traffic Generation - With SCP check
 
 on:
   schedule:
