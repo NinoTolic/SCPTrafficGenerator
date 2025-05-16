@@ -19,8 +19,11 @@ jobs:
         repository: ${{ env.PRIVATE_REPO }}
         token: ${{ secrets.SCPTesterToken }}
         path: SCPTesterFiles
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
     
-    - name: Copy Files Over from Repo
+    - name: Copy Files Over from Private Repo
       env:
         PAT: ${{ secrets.NewSCPToken }}
       run: |
@@ -28,11 +31,11 @@ jobs:
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
 
-    - name: Unpack the Zip
+    - name: Unpack the SCP Zip
       run: |
         7z x ./SCP-Windows-493_304.zip
 
-    - name: Install Windows application
+    - name: Install Windows SCP application
       run: |
         Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
 
