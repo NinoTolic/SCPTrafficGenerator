@@ -58,6 +58,6 @@ jobs:
 
         # Open each site in Chrome (or Edge)
         foreach ($site in $selected) {
-          Start-Process "chromedriver.exe" $site
+          Start-Process "chrome.exe" "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site"
           Start-Sleep -Seconds 10
         }  
