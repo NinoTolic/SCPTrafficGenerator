@@ -127,7 +127,7 @@ jobs:
             }
         } catch {
             Write-Host "Failed to read registry key: $($_.Exception.Message)"
-            "SCP status read failed at $ts: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            "SCP status read failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             "is_connected=false" >> $env:GITHUB_OUTPUT
         }
         Write-Host "::endgroup::"
