@@ -60,7 +60,7 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
+        Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /q" -wait
 
     - name: Post-install service snapshot
       shell: pwsh
@@ -152,6 +152,8 @@ jobs:
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
+        Write-Host "Starting scpservice.exe checks"
+        "Starting scpservice.exe checks" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
         for ($serviceAttempt = 1; $serviceAttempt -le ($serviceMaxRetries + 1); $serviceAttempt++) {
             $svcProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
