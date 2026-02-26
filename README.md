@@ -1,21 +1,38 @@
 SCP Traffic Generator
 
-This repository runs a GitHub Actions workflow on `windows-latest` to:
+This repository runs GitHub Actions workflows on `windows-latest` to:
 - Download required SCP installer/policy/certificate files.
 - Install and configure the SCP client.
 - Confirm SCP connection status from the Windows registry.
-- Generate controlled web traffic by opening random sites from `top-sites.json` in headless Chrome.
+- Generate controlled web traffic by opening random sites from `top-sites.json` in a detected browser (`chrome.exe` preferred, `msedge.exe` fallback).
 
 ## Workflows
 
 - `.github/workflows/main.yml`
-  - Trigger: daily schedule (`0 2 * * *`) and manual dispatch.
-  - Uses Chrome headless launch with explicit window-size and flags.
-  - Traffic generation runs only when SCP connection status is `Connected`.
+  - Name: `SCP Traffic Generation - McAfee - OldGen`
+  - Policy: `McAfeeTenant/scp-policy-mcafee-oldgen.opg`
+  - CA: `McAfeeTenant/CA_MFE_Tenant.pem`
+
+- `.github/workflows/nextgen-main.yml`
+  - Name: `SCP Traffic Generation - McAfee - NextGen`
+  - Policy: `McAfeeTenant/scp-policy-mcafee-nextgen-runner-326.opg`
+  - CA: `McAfeeTenant/CA_MFE_Tenant.pem`
+
+- `.github/workflows/main-skyhigh.yml`
+  - Name: `SCP Traffic Generation - Skyhigh - OldGen`
+  - Policy: `SkyhighTenant/scp-policy-skyhigh-oldgen-policy-158.opg`
+  - CA: `SkyhighTenant/CA_Skyhigh.pem`
+
+- `.github/workflows/nextgen-skyhigh.yml`
+  - Name: `SCP Traffic Generation - Skyhigh - NextGen`
+  - Policy: `SkyhighTenant/scp-policy-skyhigh-nextgen-policy-157.opg`
+  - CA: `SkyhighTenant/CA_Skyhigh.pem`
 
 - `.github/workflows/test-with-SCP-check.yml`
   - Trigger: manual dispatch only.
-  - Same SCP-check-gated traffic generation behavior for ad-hoc validation.
+  - Uses McAfee OldGen policy/certificate for ad-hoc SCP connectivity validation.
+
+All workflows run traffic generation only when SCP connection status is `Connected`.
 
 ## Required repository secrets
 
@@ -28,11 +45,12 @@ This repository runs a GitHub Actions workflow on `windows-latest` to:
 
 ## Troubleshooting output
 
-- Both workflows now write SCP diagnostics to `diagnostics/scp-debug.log`.
+- All workflows write SCP diagnostics to `diagnostics/scp-debug.log`.
 - Logs include:
   - Downloaded file metadata and SHA256 hashes.
   - Pre/post install service snapshots for SCP/Skyhigh.
   - SCP registry connection status check details.
-  - Chrome path/version check and selected URL count.
+  - Browser detection and selected browser path/version.
+  - Per-URL launch status with success/failure totals.
 - Diagnostics are uploaded as workflow artifacts on every run.
 - A short run outcome is also written to GitHub Step Summary.
