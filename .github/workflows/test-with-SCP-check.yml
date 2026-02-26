@@ -11,7 +11,16 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
+
+    - name: Initialize diagnostics
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path diagnostics -Force | Out-Null
+        "Workflow: $env:GITHUB_WORKFLOW" | Out-File -FilePath diagnostics/scp-debug.log -Encoding utf8
+        "Run ID: $env:GITHUB_RUN_ID" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Runner: $env:RUNNER_NAME / $env:RUNNER_OS" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Timestamp: $(Get-Date -Format o)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
     - name: Copy Files Over from Private Repo
       shell: pwsh
       env:
@@ -21,18 +30,44 @@ jobs:
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCP-Windows-493_304.zip -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Windows-493_304.zip
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+        Write-Host "::group::Downloaded Files"
+        Get-Item SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
+        Get-FileHash SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
+        Write-Host "::endgroup::"
+        Get-FileHash SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
     - name: Unpack the SCP Zip
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
         7z x ./SCP-Windows-493_304.zip
+        Get-ChildItem -Path . -Filter *.msi -Recurse | Select-Object FullName,Length | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+    - name: Pre-install service snapshot
+      shell: pwsh
+      run: |
+        "=== Pre-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Get-Service | Where-Object { $_.Name -match 'scp|skyhigh' -or $_.DisplayName -match 'scp|skyhigh' } |
+          Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "=== Pre-install processes ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Get-Process | Where-Object { $_.Name -match 'scp|skyhigh|chrome' } |
+          Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
     - name: Install Windows SCP application
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
         Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
+
+    - name: Post-install service snapshot
+      shell: pwsh
+      run: |
+        Write-Host "::group::Post-install services"
+        Get-Service | Where-Object { $_.Name -match 'scp|skyhigh' -or $_.DisplayName -match 'scp|skyhigh' } | Format-Table Name,DisplayName,Status,StartType -AutoSize
+        Write-Host "::endgroup::"
+        "=== Post-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Get-Service | Where-Object { $_.Name -match 'scp|skyhigh' -or $_.DisplayName -match 'scp|skyhigh' } |
+          Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
     - name: Deploy OPG Policy
       shell: pwsh
@@ -49,24 +84,50 @@ jobs:
     - name: Wait after CA installation
       shell: pwsh
       run: Start-Sleep -Seconds 10
-      
+
     - name: Check SCP Connection Status
       id: check_scp
       shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
+        $ts = Get-Date -Format o
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Connection Status"
-        
+
+        Write-Host "::group::SCP Connection Diagnostics"
+        Write-Host "Timestamp: $ts"
+        Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
+        Write-Host "Registry path: $regPath"
         try {
             $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
+            Write-Host "SCP registry status: '$status'"
+            "SCP status: $status at $ts" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             if ($status -eq "Connected") {
-                echo "is_connected=true" >> $env:GITHUB_OUTPUT
+                "is_connected=true" >> $env:GITHUB_OUTPUT
             } else {
-                echo "is_connected=false" >> $env:GITHUB_OUTPUT
+                "is_connected=false" >> $env:GITHUB_OUTPUT
             }
         } catch {
-            echo "is_connected=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Failed to read registry key: $($_.Exception.Message)"
+            "SCP status read failed at $ts: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            "is_connected=false" >> $env:GITHUB_OUTPUT
         }
+        Write-Host "::endgroup::"
+
+    - name: Chrome diagnostics
+      shell: pwsh
+      run: |
+        Write-Host "::group::Chrome Diagnostics"
+        $chromeCmd = Get-Command chrome.exe -ErrorAction SilentlyContinue
+        if ($null -ne $chromeCmd) {
+          Write-Host "chrome.exe path: $($chromeCmd.Source)"
+          & chrome.exe --version
+          "Chrome path: $($chromeCmd.Source)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } else {
+          Write-Host "chrome.exe not found in PATH"
+          "chrome.exe not found in PATH" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+        Write-Host "::endgroup::"
 
     - name: Access top websites from external list
       if: steps.check_scp.outputs.is_connected == 'true'
@@ -75,7 +136,13 @@ jobs:
         $ErrorActionPreference = "Stop"
         $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
         $selected = Get-Random -InputObject $topSites -Count 30
-        
+
+        "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- SCP connection status: Connected" >> $env:GITHUB_STEP_SUMMARY
+        "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
+
         foreach ($site in $selected) {
             Start-Process "chrome.exe" "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site"
             Start-Sleep -Seconds 5
@@ -85,6 +152,8 @@ jobs:
       if: steps.check_scp.outputs.is_connected != 'true'
       shell: pwsh
       run: |
+        "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- SCP connection status: Not Connected" >> $env:GITHUB_STEP_SUMMARY
         Write-Error "SCP connection status is not Connected. Skipping traffic generation."
 
     - name: Terminate Chrome processes
@@ -92,3 +161,11 @@ jobs:
       shell: pwsh
       run: |
         Get-Process -Name "chrome" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    - name: Upload diagnostics artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scp-diagnostics-test-${{ github.run_id }}
+        path: diagnostics/scp-debug.log
+        if-no-files-found: warn
