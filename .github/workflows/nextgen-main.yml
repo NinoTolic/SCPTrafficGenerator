@@ -138,7 +138,7 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
-        $valueName = "Connection Status"
+        $valueName = "Status"
         $maxRetries = 3
         $retryDelaySeconds = 15
         $readTimeoutSeconds = 10
@@ -165,7 +165,7 @@ jobs:
                 Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                 Write-Host "Attempt $attempt/$($maxRetries + 1) status: '$status' at $ts"
                 "SCP status attempt $attempt at ${ts}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-                if ($status -eq "Connected") {
+                if ($status -eq "Secure") {
                     $isConnected = $true
                     break
                 }
@@ -189,7 +189,7 @@ jobs:
         } else {
             "is_connected=false" >> $env:GITHUB_OUTPUT
             Write-Host "::endgroup::"
-            throw "SCP connection status did not become Connected after $($maxRetries + 1) attempts."
+            throw "SCP status did not become Secure after $($maxRetries + 1) attempts."
         }
         Write-Host "::endgroup::"
 
@@ -277,7 +277,7 @@ jobs:
         "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "Browser executable: $env:BROWSER_EXE" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
-        "- SCP connection status: Connected" >> $env:GITHUB_STEP_SUMMARY
+        "- SCP status: Secure" >> $env:GITHUB_STEP_SUMMARY
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
         "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
 
@@ -311,8 +311,8 @@ jobs:
       shell: pwsh
       run: |
         "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
-        "- SCP connection status: Not Connected" >> $env:GITHUB_STEP_SUMMARY
-        Write-Error "SCP connection status is not Connected. Skipping traffic generation."
+        "- SCP status: Not Secure" >> $env:GITHUB_STEP_SUMMARY
+        Write-Error "SCP status is not Secure. Skipping traffic generation."
 
     - name: Terminate browser processes
       if: always()  # Runs even if previous step failed
