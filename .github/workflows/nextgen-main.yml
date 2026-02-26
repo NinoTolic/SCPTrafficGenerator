@@ -1,0 +1,188 @@
+name: SCP Traffic Generation - NextGen
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2:00 AM UTC
+  workflow_dispatch:
+
+jobs:
+  NextGenSCP-run:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize diagnostics
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path diagnostics -Force | Out-Null
+        "Workflow: $env:GITHUB_WORKFLOW" | Out-File -FilePath diagnostics/scp-debug.log -Encoding utf8
+        "Run ID: $env:GITHUB_RUN_ID" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Runner: $env:RUNNER_NAME / $env:RUNNER_OS" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Timestamp: $(Get-Date -Format o)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+    
+    - name: Copy Files Over from Private Repo
+      shell: pwsh
+      env:
+        PAT: ${{ secrets.NewSCPToken }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/ScpInstaller.x64.msi -Headers @{Authorization="Token $($env:PAT)"} -OutFile ScpInstaller.x64.msi
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/NextGenScpPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile NextGenScpPolicy.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+        Write-Host "::group::Downloaded Files"
+        Get-Item ScpInstaller.x64.msi, NextGenScpPolicy.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
+        Get-FileHash ScpInstaller.x64.msi, NextGenScpPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
+        Write-Host "::endgroup::"
+        Get-FileHash ScpInstaller.x64.msi, NextGenScpPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+    - name: Pre-install service snapshot
+      shell: pwsh
+      run: |
+        "=== Pre-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+        "=== Pre-install processes ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Process -Name "*scp*", "*skyhigh*", "chrome" -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Process snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
+    - name: Install Windows SCP application
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
+
+    - name: Post-install service snapshot
+      shell: pwsh
+      run: |
+        Write-Host "::group::Post-install services"
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue | Format-Table Name,DisplayName,Status,StartType -AutoSize
+        } catch {
+          Write-Host "Post-install service snapshot failed: $($_.Exception.Message)"
+        }
+        Write-Host "::endgroup::"
+        "=== Post-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Post-install service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
+    - name: Deploy OPG Policy
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        Copy-Item -Path "./NextGenScpPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
+
+    - name: Install Root CA
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        Import-Certificate "./CA_MFE_Tenant.pem" -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
+
+    - name: Wait after CA installation
+      shell: pwsh
+      run: Start-Sleep -Seconds 10
+
+    - name: Check SCP Connection Status
+      id: check_scp
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $ts = Get-Date -Format o
+        $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
+        $valueName = "Connection Status"
+
+        Write-Host "::group::SCP Connection Diagnostics"
+        Write-Host "Timestamp: $ts"
+        Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
+        Write-Host "Registry path: $regPath"
+        try {
+            $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
+            Write-Host "SCP registry status: '$status'"
+            "SCP status: $status at $ts" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            if ($status -eq "Connected") {
+                "is_connected=true" >> $env:GITHUB_OUTPUT
+            } else {
+                "is_connected=false" >> $env:GITHUB_OUTPUT
+            }
+        } catch {
+            Write-Host "Failed to read registry key: $($_.Exception.Message)"
+            "SCP status read failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            "is_connected=false" >> $env:GITHUB_OUTPUT
+        }
+        Write-Host "::endgroup::"
+
+    - name: Chrome diagnostics
+      shell: pwsh
+      run: |
+        Write-Host "::group::Chrome Diagnostics"
+        $chromeCmd = Get-Command chrome.exe -ErrorAction SilentlyContinue
+        if ($null -ne $chromeCmd) {
+          Write-Host "chrome.exe path: $($chromeCmd.Source)"
+          & chrome.exe --version
+          "Chrome path: $($chromeCmd.Source)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } else {
+          Write-Host "chrome.exe not found in PATH"
+          "chrome.exe not found in PATH" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+        Write-Host "::endgroup::"
+
+    - name: Access top websites from external list
+      if: steps.check_scp.outputs.is_connected == 'true'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        # Load the list of URLs from the JSON file
+        $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
+
+        # Select 30 random URLs
+        $selected = Get-Random -InputObject $topSites -Count 30
+
+        "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- SCP connection status: Connected" >> $env:GITHUB_STEP_SUMMARY
+        "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
+
+        # Open each site in Chrome (or Edge)
+        foreach ($site in $selected) {
+          Start-Process "chrome.exe" "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site"
+          Start-Sleep -Seconds 5
+        }
+
+    - name: Fail if SCP is not connected
+      if: steps.check_scp.outputs.is_connected != 'true'
+      shell: pwsh
+      run: |
+        "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- SCP connection status: Not Connected" >> $env:GITHUB_STEP_SUMMARY
+        Write-Error "SCP connection status is not Connected. Skipping traffic generation."
+
+    - name: Terminate Chrome processes
+      if: always()  # Runs even if previous step failed
+      shell: pwsh
+      run: |
+        Get-Process -Name "chrome" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    - name: Upload diagnostics artifact
+      if: always()
+      env:
+        NODE_EXTRA_CA_CERTS: ${{ github.workspace }}\CA_MFE_Tenant.pem
+      uses: actions/upload-artifact@v4
+      with:
+        name: scp-diagnostics-nextgen-${{ github.run_id }}
+        path: diagnostics/scp-debug.log
+        if-no-files-found: warn
