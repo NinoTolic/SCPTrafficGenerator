@@ -133,6 +133,7 @@ jobs:
 
     - name: Check SCP Connection Status
       id: check_scp
+      timeout-minutes: 3
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
@@ -140,6 +141,7 @@ jobs:
         $valueName = "Connection Status"
         $maxRetries = 3
         $retryDelaySeconds = 15
+        $readTimeoutSeconds = 10
         $isConnected = $false
 
         Write-Host "::group::SCP Connection Diagnostics"
@@ -148,7 +150,19 @@ jobs:
         for ($attempt = 1; $attempt -le ($maxRetries + 1); $attempt++) {
             $ts = Get-Date -Format o
             try {
-                $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
+                $job = Start-Job -ScriptBlock {
+                    param($Path, $Name)
+                    Get-ItemPropertyValue -Path $Path -Name $Name -ErrorAction Stop
+                } -ArgumentList $regPath, $valueName
+
+                if (-not (Wait-Job -Job $job -Timeout $readTimeoutSeconds)) {
+                    Stop-Job -Job $job -ErrorAction SilentlyContinue
+                    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                    throw "Registry read timed out after $readTimeoutSeconds seconds."
+                }
+
+                $status = Receive-Job -Job $job -ErrorAction Stop
+                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                 Write-Host "Attempt $attempt/$($maxRetries + 1) status: '$status' at $ts"
                 "SCP status attempt $attempt at ${ts}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
                 if ($status -eq "Connected") {
@@ -156,6 +170,10 @@ jobs:
                     break
                 }
             } catch {
+                if ($job) {
+                    Stop-Job -Job $job -ErrorAction SilentlyContinue
+                    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+                }
                 Write-Host "Attempt $attempt/$($maxRetries + 1) read failed: $($_.Exception.Message)"
                 "SCP status attempt $attempt failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             }
