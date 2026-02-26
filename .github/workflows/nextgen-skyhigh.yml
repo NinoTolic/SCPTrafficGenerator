@@ -135,22 +135,40 @@ jobs:
         $ErrorActionPreference = "Stop"
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
-        $maxRetries = 3
-        $retryDelaySeconds = 15
+        $serviceMaxRetries = 3
+        $serviceRetryDelaySeconds = 15
+        $registryMaxRetries = 3
+        $registryRetryDelaySeconds = 15
         $readTimeoutSeconds = 10
         $isConnected = $false
+        $isServiceRunning = $false
 
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
-        $initialProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
-        if (-not $initialProc) {
-            "scpservice.exe is not running before registry checks." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            Write-Host "::endgroup::"
-            throw "scpservice.exe is not running before registry checks."
+
+        for ($serviceAttempt = 1; $serviceAttempt -le ($serviceMaxRetries + 1); $serviceAttempt++) {
+            $svcProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
+            if ($svcProc) {
+                Write-Host "scpservice.exe is running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')"
+                "scpservice.exe running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+                $isServiceRunning = $true
+                break
+            }
+
+            Write-Host "scpservice.exe is NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)."
+            "scpservice.exe NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+            if ($serviceAttempt -le $serviceMaxRetries) {
+                Write-Host "Waiting $serviceRetryDelaySeconds seconds before next service check..."
+                Start-Sleep -Seconds $serviceRetryDelaySeconds
+            }
         }
-        Write-Host "scpservice.exe running. PID(s): $($initialProc.Id -join ', ')"
-        "scpservice.exe running before registry checks. PID(s): $($initialProc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        if (-not $isServiceRunning) {
+            Write-Host "::endgroup::"
+            throw "scpservice.exe is not running after $($serviceMaxRetries + 1) attempts."
+        }
 
         try {
             $aboutDump = Get-ItemProperty -Path $regPath -ErrorAction Stop
@@ -164,15 +182,10 @@ jobs:
             "Failed to dump registry key $regPath: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         }
 
-        for ($attempt = 1; $attempt -le ($maxRetries + 1); $attempt++) {
+        for ($attempt = 1; $attempt -le ($registryMaxRetries + 1); $attempt++) {
             $ts = Get-Date -Format o
             $job = $null
             try {
-                $attemptProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
-                if (-not $attemptProc) {
-                    throw "scpservice.exe is not running before attempt $attempt."
-                }
-
                 $job = Start-Job -ScriptBlock {
                     param($Path, $Name)
                     Get-ItemPropertyValue -Path $Path -Name $Name -ErrorAction Stop
@@ -186,7 +199,7 @@ jobs:
 
                 $status = Receive-Job -Job $job -ErrorAction Stop
                 Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-                Write-Host "Attempt $attempt/$($maxRetries + 1) status: '$status' at $ts"
+                Write-Host "Registry attempt $attempt/$($registryMaxRetries + 1) status: '$status' at $ts"
                 "SCP status attempt $attempt at ${ts}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
                 if ($status -eq "Secure") {
                     $isConnected = $true
@@ -197,13 +210,13 @@ jobs:
                     Stop-Job -Job $job -ErrorAction SilentlyContinue
                     Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
                 }
-                Write-Host "Attempt $attempt/$($maxRetries + 1) read failed: $($_.Exception.Message)"
+                Write-Host "Registry attempt $attempt/$($registryMaxRetries + 1) read failed: $($_.Exception.Message)"
                 "SCP status attempt $attempt failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             }
 
-            if ($attempt -le $maxRetries) {
-                Write-Host "SCP not connected yet. Retrying in $retryDelaySeconds seconds..."
-                Start-Sleep -Seconds $retryDelaySeconds
+            if ($attempt -le $registryMaxRetries) {
+                Write-Host "SCP not secure yet. Retrying registry check in $registryRetryDelaySeconds seconds..."
+                Start-Sleep -Seconds $registryRetryDelaySeconds
             }
         }
 
@@ -212,7 +225,7 @@ jobs:
         } else {
             "is_connected=false" >> $env:GITHUB_OUTPUT
             Write-Host "::endgroup::"
-            throw "SCP status did not become Secure after $($maxRetries + 1) attempts."
+            throw "SCP status did not become Secure after $($registryMaxRetries + 1) attempts."
         }
         Write-Host "::endgroup::"
 
