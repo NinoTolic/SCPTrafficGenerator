@@ -28,8 +28,8 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCP-Windows-493_304.zip -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Windows-493_304.zip
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
         Write-Host "::group::Downloaded Files"
         Get-Item SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
         Get-FileHash SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize

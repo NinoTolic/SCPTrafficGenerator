@@ -1,4 +1,4 @@
-name: SCP Traffic Generation - McAfeeTenant
+name: SCP Traffic Generation - NextGen - SkyhighTenant
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  McAfeeTenant-run:
+  NextGenSCP-Skyhigh-run:
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -29,21 +29,14 @@ jobs:
         PAT: ${{ secrets.NewSCPToken }}
       run: |
         $ErrorActionPreference = "Stop"
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCP-Windows-493_304.zip -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Windows-493_304.zip
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/ScpInstaller.x64.msi -Headers @{Authorization="Token $($env:PAT)"} -OutFile ScpInstaller.x64.msi
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/SCP%20Workflow%20Policy-157.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile "SCP Workflow Policy-157.opg"
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/CA_Skyhigh.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_Skyhigh.pem
         Write-Host "::group::Downloaded Files"
-        Get-Item SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
-        Get-FileHash SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
+        Get-Item ScpInstaller.x64.msi, "SCP Workflow Policy-157.opg", CA_Skyhigh.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
+        Get-FileHash ScpInstaller.x64.msi, "SCP Workflow Policy-157.opg", CA_Skyhigh.pem -Algorithm SHA256 | Format-Table -AutoSize
         Write-Host "::endgroup::"
-        Get-FileHash SCP-Windows-493_304.zip, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-
-    - name: Unpack the SCP Zip
-      shell: pwsh
-      run: |
-        $ErrorActionPreference = "Stop"
-        7z x ./SCP-Windows-493_304.zip
-        Get-ChildItem -Path . -Filter *.msi -Recurse | Select-Object FullName,Length | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Get-FileHash ScpInstaller.x64.msi, "SCP Workflow Policy-157.opg", CA_Skyhigh.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
     - name: Pre-install service snapshot
       shell: pwsh
@@ -91,7 +84,7 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
+        Copy-Item -Path "./SCP Workflow Policy-157.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
     - name: Install Root CA
       timeout-minutes: 5
@@ -99,7 +92,7 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         $ts = Get-Date -Format o
-        $caPath = "./CA_MFE_Tenant.pem"
+        $caPath = "./CA_Skyhigh.pem"
         if (-not (Test-Path $caPath)) {
           throw "Root CA file not found at $caPath"
         }
@@ -223,9 +216,9 @@ jobs:
     - name: Upload diagnostics artifact
       if: always()
       env:
-        NODE_EXTRA_CA_CERTS: ${{ github.workspace }}\CA_MFE_Tenant.pem
+        NODE_EXTRA_CA_CERTS: ${{ github.workspace }}\CA_Skyhigh.pem
       uses: actions/upload-artifact@v4
       with:
-        name: scp-diagnostics-main-mcafee-${{ github.run_id }}
+        name: scp-diagnostics-nextgen-skyhigh-${{ github.run_id }}
         path: diagnostics/scp-debug.log
         if-no-files-found: warn

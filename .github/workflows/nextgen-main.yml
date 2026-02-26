@@ -1,4 +1,4 @@
-name: SCP Traffic Generation - NextGen
+name: SCP Traffic Generation - NextGen - McAfeeTenant
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  NextGenSCP-run:
+  NextGenSCP-McAfee-run:
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -30,13 +30,13 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/ScpInstaller.x64.msi -Headers @{Authorization="Token $($env:PAT)"} -OutFile ScpInstaller.x64.msi
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/NextGenScpPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile NextGenScpPolicy.opg
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
         Write-Host "::group::Downloaded Files"
-        Get-Item ScpInstaller.x64.msi, NextGenScpPolicy.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
-        Get-FileHash ScpInstaller.x64.msi, NextGenScpPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
+        Get-Item ScpInstaller.x64.msi, SCPPolicy.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
+        Get-FileHash ScpInstaller.x64.msi, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
         Write-Host "::endgroup::"
-        Get-FileHash ScpInstaller.x64.msi, NextGenScpPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Get-FileHash ScpInstaller.x64.msi, SCPPolicy.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
     - name: Pre-install service snapshot
       shell: pwsh
@@ -84,7 +84,7 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        Copy-Item -Path "./NextGenScpPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
+        Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
     - name: Install Root CA
       timeout-minutes: 5
@@ -219,6 +219,6 @@ jobs:
         NODE_EXTRA_CA_CERTS: ${{ github.workspace }}\CA_MFE_Tenant.pem
       uses: actions/upload-artifact@v4
       with:
-        name: scp-diagnostics-nextgen-${{ github.run_id }}
+        name: scp-diagnostics-nextgen-mcafee-${{ github.run_id }}
         path: diagnostics/scp-debug.log
         if-no-files-found: warn
