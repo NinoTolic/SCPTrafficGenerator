@@ -127,10 +127,6 @@ jobs:
         "- Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))" >> $env:GITHUB_STEP_SUMMARY
         Write-Host "::endgroup::"
 
-    - name: Wait after CA installation
-      shell: pwsh
-      run: Start-Sleep -Seconds 10
-
     - name: Check SCP Connection Status
       id: check_scp
       timeout-minutes: 3
