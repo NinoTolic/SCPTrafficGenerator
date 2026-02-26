@@ -110,22 +110,33 @@ jobs:
         Get-FileHash $caPath -Algorithm SHA256 | Format-Table -AutoSize
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $imported = Import-Certificate $caPath -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
+        $certutilStdOut = "diagnostics/certutil-stdout.log"
+        $certutilStdErr = "diagnostics/certutil-stderr.log"
+        if (Test-Path $certutilStdOut) { Remove-Item $certutilStdOut -Force }
+        if (Test-Path $certutilStdErr) { Remove-Item $certutilStdErr -Force }
+
+        $proc = Start-Process -FilePath "certutil.exe" -ArgumentList @("-f", "-addstore", "Root", $caPath) -PassThru -NoNewWindow -RedirectStandardOutput $certutilStdOut -RedirectStandardError $certutilStdErr
+        $completed = $proc.WaitForExit(120000)
         $sw.Stop()
 
-        if ($null -eq $imported -or $imported.Count -eq 0) {
-          Write-Host "Import-Certificate returned no certificate objects."
-        } else {
-          foreach ($cert in $imported) {
-            Write-Host "Imported cert thumbprint: $($cert.Thumbprint)"
-            Write-Host "Imported cert subject: $($cert.Subject)"
-          }
+        if (-not $completed) {
+          try { $proc.Kill() } catch { }
+          "certutil timed out after 120 seconds." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          throw "certutil -addstore timed out after 120 seconds."
+        }
 
-          $store = Get-ChildItem Cert:\LocalMachine\Root -ErrorAction SilentlyContinue
-          foreach ($cert in $imported) {
-            $present = $store | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
-            Write-Host "Present in LocalMachine\\Root: $([bool]$present) ($($cert.Thumbprint))"
-          }
+        Write-Host "certutil exit code: $($proc.ExitCode)"
+        "certutil exit code: $($proc.ExitCode)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        if (Test-Path $certutilStdOut) {
+          Get-Content $certutilStdOut | Select-Object -First 20 | ForEach-Object { Write-Host "certutil stdout: $_" }
+        }
+        if (Test-Path $certutilStdErr) {
+          Get-Content $certutilStdErr | Select-Object -First 20 | ForEach-Object { Write-Host "certutil stderr: $_" }
+        }
+
+        if ($proc.ExitCode -ne 0) {
+          throw "certutil -addstore failed with exit code $($proc.ExitCode)."
         }
 
         Write-Host "Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))"
