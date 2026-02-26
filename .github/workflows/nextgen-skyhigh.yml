@@ -103,8 +103,14 @@ jobs:
         Get-FileHash $caPath -Algorithm SHA256 | Format-Table -AutoSize
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        Write-Host "Starting certutil addstore..."
         $proc = Start-Process -FilePath "certutil.exe" -ArgumentList @("-f", "-addstore", "Root", $caPath) -PassThru -NoNewWindow
-        $completed = $proc.WaitForExit(120000)
+        $deadline = (Get-Date).AddSeconds(120)
+        while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
+          Start-Sleep -Seconds 5
+          Write-Host "certutil still running... elapsed=$([Math]::Round($sw.Elapsed.TotalSeconds, 1))s"
+        }
+        $completed = $proc.HasExited
         $sw.Stop()
 
         if (-not $completed) {
