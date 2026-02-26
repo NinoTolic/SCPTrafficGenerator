@@ -6,46 +6,48 @@ on:
 jobs:
   secure-deployment:
     runs-on: windows-latest
-    env:
-      PRIVATE_REPO: NinoTolic/SCPTesterFiles
-      PAT2: ${{ secrets.SCPTesterToken }}
+    timeout-minutes: 30
 
     steps:
-    - name: Checkout private resources
-      uses: actions/checkout@v4
-      with:
-        repository: ${{ env.PRIVATE_REPO }}
-        token: ${{ secrets.SCPTesterToken }}
-        path: SCPTesterFiles
-
     - name: Checkout repository
       uses: actions/checkout@v4
     
     - name: Copy Files Over from Private Repo
+      shell: pwsh
       env:
         PAT: ${{ secrets.NewSCPToken }}
       run: |
+        $ErrorActionPreference = "Stop"
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCP-Windows-493_304.zip -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Windows-493_304.zip
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SCPPolicy.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCPPolicy.opg
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
 
     - name: Unpack the SCP Zip
+      shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
         7z x ./SCP-Windows-493_304.zip
 
     - name: Install Windows SCP application
+      shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
         Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /quiet" -wait
 
     - name: Deploy OPG Policy
+      shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
         Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
 
     - name: Install Root CA
+      shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
         Import-Certificate "./CA_MFE_Tenant.pem" -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
 
     - name: Wait after CA installation
+      shell: pwsh
       run: Start-Sleep -Seconds 10
       
     - name: Check SCP Connection Status
@@ -70,11 +72,23 @@ jobs:
       if: steps.check_scp.outputs.is_connected == 'true'
       shell: pwsh
       run: |
-        $topSites = Get-Content "./data/top-sites.json" | ConvertFrom-Json
+        $ErrorActionPreference = "Stop"
+        $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
         $selected = Get-Random -InputObject $topSites -Count 30
         
         foreach ($site in $selected) {
-            Start-Process "chromedriver.exe" $site
-            Start-Sleep -Seconds 10
+            Start-Process "chrome.exe" "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site"
+            Start-Sleep -Seconds 5
         }
-            }
+
+    - name: Fail if SCP is not connected
+      if: steps.check_scp.outputs.is_connected != 'true'
+      shell: pwsh
+      run: |
+        Write-Error "SCP connection status is not Connected. Skipping traffic generation."
+
+    - name: Terminate Chrome processes
+      if: always()
+      shell: pwsh
+      run: |
+        Get-Process -Name "chrome" -ErrorAction SilentlyContinue | Stop-Process -Force
