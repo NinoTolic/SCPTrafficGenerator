@@ -142,27 +142,42 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        $ts = Get-Date -Format o
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Connection Status"
+        $maxRetries = 3
+        $retryDelaySeconds = 15
+        $isConnected = $false
 
         Write-Host "::group::SCP Connection Diagnostics"
-        Write-Host "Timestamp: $ts"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
-        try {
-            $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
-            Write-Host "SCP registry status: '$status'"
-            "SCP status: $status at $ts" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            if ($status -eq "Connected") {
-                "is_connected=true" >> $env:GITHUB_OUTPUT
-            } else {
-                "is_connected=false" >> $env:GITHUB_OUTPUT
+        for ($attempt = 1; $attempt -le ($maxRetries + 1); $attempt++) {
+            $ts = Get-Date -Format o
+            try {
+                $status = Get-ItemPropertyValue -Path $regPath -Name $valueName -ErrorAction Stop
+                Write-Host "Attempt $attempt/$($maxRetries + 1) status: '$status' at $ts"
+                "SCP status attempt $attempt at ${ts}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+                if ($status -eq "Connected") {
+                    $isConnected = $true
+                    break
+                }
+            } catch {
+                Write-Host "Attempt $attempt/$($maxRetries + 1) read failed: $($_.Exception.Message)"
+                "SCP status attempt $attempt failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             }
-        } catch {
-            Write-Host "Failed to read registry key: $($_.Exception.Message)"
-            "SCP status read failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+            if ($attempt -le $maxRetries) {
+                Write-Host "SCP not connected yet. Retrying in $retryDelaySeconds seconds..."
+                Start-Sleep -Seconds $retryDelaySeconds
+            }
+        }
+
+        if ($isConnected) {
+            "is_connected=true" >> $env:GITHUB_OUTPUT
+        } else {
             "is_connected=false" >> $env:GITHUB_OUTPUT
+            Write-Host "::endgroup::"
+            throw "SCP connection status did not become Connected after $($maxRetries + 1) attempts."
         }
         Write-Host "::endgroup::"
 
