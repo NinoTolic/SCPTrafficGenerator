@@ -168,19 +168,26 @@ jobs:
         }
         Write-Host "::endgroup::"
 
-    - name: Chrome diagnostics
+    - name: Browser diagnostics
       shell: pwsh
       run: |
-        Write-Host "::group::Chrome Diagnostics"
-        $chromeCmd = Get-Command chrome.exe -ErrorAction SilentlyContinue
-        if ($null -ne $chromeCmd) {
-          Write-Host "chrome.exe path: $($chromeCmd.Source)"
-          & chrome.exe --version
-          "Chrome path: $($chromeCmd.Source)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        } else {
-          Write-Host "chrome.exe not found in PATH"
-          "chrome.exe not found in PATH" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        $ErrorActionPreference = "Stop"
+        Write-Host "::group::Browser Diagnostics"
+        $browserCmd = Get-Command chrome.exe -ErrorAction SilentlyContinue
+        if ($null -eq $browserCmd) {
+          $browserCmd = Get-Command msedge.exe -ErrorAction SilentlyContinue
         }
+
+        if ($null -eq $browserCmd) {
+          "No supported browser found (checked chrome.exe, msedge.exe)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          Write-Host "::endgroup::"
+          throw "No supported browser found (checked chrome.exe, msedge.exe)."
+        }
+
+        Write-Host "Selected browser: $($browserCmd.Name) at $($browserCmd.Source)"
+        & $browserCmd.Source --version
+        "Selected browser: $($browserCmd.Source)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "BROWSER_EXE=$($browserCmd.Source)" >> $env:GITHUB_ENV
         Write-Host "::endgroup::"
 
     - name: Access top websites from external list
@@ -188,22 +195,50 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
+        if (-not $env:BROWSER_EXE) {
+          throw "BROWSER_EXE environment variable is not set."
+        }
+
         # Load the list of URLs from the JSON file
         $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
 
         # Select 30 random URLs
         $selected = Get-Random -InputObject $topSites -Count 30
+        $successCount = 0
+        $failureCount = 0
+        $urlIndex = 0
 
         "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Browser executable: $env:BROWSER_EXE" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
         "- SCP connection status: Connected" >> $env:GITHUB_STEP_SUMMARY
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
+        "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
 
         # Open each site in Chrome (or Edge)
         foreach ($site in $selected) {
-          Start-Process "chrome.exe" "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site"
+          $urlIndex++
+          $ts = Get-Date -Format o
+          try {
+            Start-Process -FilePath $env:BROWSER_EXE -ArgumentList "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site" -ErrorAction Stop | Out-Null
+            $successCount++
+            "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          } catch {
+            $failureCount++
+            "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
+          }
           Start-Sleep -Seconds 5
+        }
+
+        "- URL launch success count: $successCount" >> $env:GITHUB_STEP_SUMMARY
+        "- URL launch failure count: $failureCount" >> $env:GITHUB_STEP_SUMMARY
+        "URL launch success count: $successCount" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "URL launch failure count: $failureCount" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        if ($successCount -eq 0) {
+          throw "No URLs were successfully launched."
         }
 
     - name: Fail if SCP is not connected
@@ -214,11 +249,11 @@ jobs:
         "- SCP connection status: Not Connected" >> $env:GITHUB_STEP_SUMMARY
         Write-Error "SCP connection status is not Connected. Skipping traffic generation."
 
-    - name: Terminate Chrome processes
+    - name: Terminate browser processes
       if: always()  # Runs even if previous step failed
       shell: pwsh
       run: |
-        Get-Process -Name "chrome" -ErrorAction SilentlyContinue | Stop-Process -Force
+        Get-Process -Name "chrome", "msedge" -ErrorAction SilentlyContinue | Stop-Process -Force
 
     - name: Upload diagnostics artifact
       if: always()
