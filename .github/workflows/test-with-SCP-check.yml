@@ -108,12 +108,7 @@ jobs:
         Get-FileHash $caPath -Algorithm SHA256 | Format-Table -AutoSize
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $certutilStdOut = "diagnostics/certutil-stdout.log"
-        $certutilStdErr = "diagnostics/certutil-stderr.log"
-        if (Test-Path $certutilStdOut) { Remove-Item $certutilStdOut -Force }
-        if (Test-Path $certutilStdErr) { Remove-Item $certutilStdErr -Force }
-
-        $proc = Start-Process -FilePath "certutil.exe" -ArgumentList @("-f", "-addstore", "Root", $caPath) -PassThru -NoNewWindow -RedirectStandardOutput $certutilStdOut -RedirectStandardError $certutilStdErr
+        $proc = Start-Process -FilePath "certutil.exe" -ArgumentList @("-f", "-addstore", "Root", $caPath) -PassThru -NoNewWindow
         $completed = $proc.WaitForExit(120000)
         $sw.Stop()
 
@@ -125,13 +120,6 @@ jobs:
 
         Write-Host "certutil exit code: $($proc.ExitCode)"
         "certutil exit code: $($proc.ExitCode)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-
-        if (Test-Path $certutilStdOut) {
-          Get-Content $certutilStdOut | Select-Object -First 20 | ForEach-Object { Write-Host "certutil stdout: $_" }
-        }
-        if (Test-Path $certutilStdErr) {
-          Get-Content $certutilStdErr | Select-Object -First 20 | ForEach-Object { Write-Host "certutil stderr: $_" }
-        }
 
         if ($proc.ExitCode -ne 0) {
           throw "certutil -addstore failed with exit code $($proc.ExitCode)."
