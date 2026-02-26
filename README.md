@@ -25,3 +25,14 @@ This repository runs a GitHub Actions workflow on `windows-latest` to:
 
 - `top-sites.json`: JSON array of candidate URLs.
 - The workflow randomly selects 30 URLs per run.
+
+## Troubleshooting output
+
+- Both workflows now write SCP diagnostics to `diagnostics/scp-debug.log`.
+- Logs include:
+  - Downloaded file metadata and SHA256 hashes.
+  - Pre/post install service snapshots for SCP/Skyhigh.
+  - SCP registry connection status check details.
+  - Chrome path/version check and selected URL count.
+- Diagnostics are uploaded as workflow artifacts on every run.
+- A short run outcome is also written to GitHub Step Summary.
