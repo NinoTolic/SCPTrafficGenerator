@@ -89,7 +89,7 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
+        Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
     - name: Install Root CA
       timeout-minutes: 5
