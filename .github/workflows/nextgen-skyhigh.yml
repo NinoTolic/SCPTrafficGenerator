@@ -147,9 +147,36 @@ jobs:
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
+        $initialProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
+        if (-not $initialProc) {
+            "scpservice.exe is not running before registry checks." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "::endgroup::"
+            throw "scpservice.exe is not running before registry checks."
+        }
+        Write-Host "scpservice.exe running. PID(s): $($initialProc.Id -join ', ')"
+        "scpservice.exe running before registry checks. PID(s): $($initialProc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        try {
+            $aboutDump = Get-ItemProperty -Path $regPath -ErrorAction Stop
+            $aboutText = $aboutDump | Format-List * | Out-String
+            Write-Host "SCP About registry dump:"
+            Write-Host $aboutText
+            "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+            Write-Host "Failed to dump registry key $regPath: $($_.Exception.Message)"
+            "Failed to dump registry key $regPath: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
         for ($attempt = 1; $attempt -le ($maxRetries + 1); $attempt++) {
             $ts = Get-Date -Format o
+            $job = $null
             try {
+                $attemptProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
+                if (-not $attemptProc) {
+                    throw "scpservice.exe is not running before attempt $attempt."
+                }
+
                 $job = Start-Job -ScriptBlock {
                     param($Path, $Name)
                     Get-ItemPropertyValue -Path $Path -Name $Name -ErrorAction Stop
