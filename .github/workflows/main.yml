@@ -94,10 +94,46 @@ jobs:
         Copy-Item -Path "./SCPPolicy.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp"
 
     - name: Install Root CA
+      timeout-minutes: 5
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        Import-Certificate "./CA_MFE_Tenant.pem" -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
+        $ts = Get-Date -Format o
+        $caPath = "./CA_MFE_Tenant.pem"
+        if (-not (Test-Path $caPath)) {
+          throw "Root CA file not found at $caPath"
+        }
+
+        Write-Host "::group::Root CA install diagnostics"
+        Write-Host "Start: $ts"
+        Get-Item $caPath | Select-Object FullName,Length,LastWriteTime | Format-List
+        Get-FileHash $caPath -Algorithm SHA256 | Format-Table -AutoSize
+
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $imported = Import-Certificate $caPath -CertStoreLocation Cert:\LocalMachine\Root\ -Confirm:$false
+        $sw.Stop()
+
+        if ($null -eq $imported -or $imported.Count -eq 0) {
+          Write-Host "Import-Certificate returned no certificate objects."
+        } else {
+          foreach ($cert in $imported) {
+            Write-Host "Imported cert thumbprint: $($cert.Thumbprint)"
+            Write-Host "Imported cert subject: $($cert.Subject)"
+          }
+
+          $store = Get-ChildItem Cert:\LocalMachine\Root -ErrorAction SilentlyContinue
+          foreach ($cert in $imported) {
+            $present = $store | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+            Write-Host "Present in LocalMachine\\Root: $([bool]$present) ($($cert.Thumbprint))"
+          }
+        }
+
+        Write-Host "Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))"
+        "Root CA import at ${ts}; duration_seconds=$([Math]::Round($sw.Elapsed.TotalSeconds, 2))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "### Root CA Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- Import started: $ts" >> $env:GITHUB_STEP_SUMMARY
+        "- Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))" >> $env:GITHUB_STEP_SUMMARY
+        Write-Host "::endgroup::"
 
     - name: Wait after CA installation
       shell: pwsh
