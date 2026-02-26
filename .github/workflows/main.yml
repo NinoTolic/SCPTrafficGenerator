@@ -49,11 +49,19 @@ jobs:
       shell: pwsh
       run: |
         "=== Pre-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        Get-Service | Where-Object { $_.Name -match 'scp|skyhigh' -or $_.DisplayName -match 'scp|skyhigh' } |
-          Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
         "=== Pre-install processes ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        Get-Process | Where-Object { $_.Name -match 'scp|skyhigh|chrome' } |
-          Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Process -Name "*scp*", "*skyhigh*", "chrome" -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Process snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
 
     - name: Install Windows SCP application
       shell: pwsh
@@ -65,11 +73,19 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "::group::Post-install services"
-        Get-Service | Where-Object { $_.Name -match 'scp|skyhigh' -or $_.DisplayName -match 'scp|skyhigh' } | Format-Table Name,DisplayName,Status,StartType -AutoSize
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue | Format-Table Name,DisplayName,Status,StartType -AutoSize
+        } catch {
+          Write-Host "Post-install service snapshot failed: $($_.Exception.Message)"
+        }
         Write-Host "::endgroup::"
         "=== Post-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        Get-Service | Where-Object { $_.Name -match 'scp|skyhigh' -or $_.DisplayName -match 'scp|skyhigh' } |
-          Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Post-install service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
 
     - name: Deploy OPG Policy
       shell: pwsh
