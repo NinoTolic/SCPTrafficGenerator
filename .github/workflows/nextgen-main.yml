@@ -1,4 +1,4 @@
-name: SCP Traffic Generation - NextGen - McAfeeTenant
+name: SCP Traffic Generation - McAfee - NextGen
 
 on:
   schedule:
@@ -30,13 +30,13 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/ScpInstaller.x64.msi -Headers @{Authorization="Token $($env:PAT)"} -OutFile ScpInstaller.x64.msi
-        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/SCP-Runner-Config-326.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile SCP-Runner-Config-326.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/scp-policy-mcafee-nextgen-runner-326.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile scp-policy-mcafee-nextgen-runner-326.opg
         Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
         Write-Host "::group::Downloaded Files"
-        Get-Item ScpInstaller.x64.msi, SCP-Runner-Config-326.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
-        Get-FileHash ScpInstaller.x64.msi, SCP-Runner-Config-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
+        Get-Item ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
+        Get-FileHash ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
         Write-Host "::endgroup::"
-        Get-FileHash ScpInstaller.x64.msi, SCP-Runner-Config-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Get-FileHash ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
     - name: Pre-install service snapshot
       shell: pwsh
@@ -84,7 +84,7 @@ jobs:
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        Copy-Item -Path "./SCP-Runner-Config-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
+        Copy-Item -Path "./scp-policy-mcafee-nextgen-runner-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
     - name: Install Root CA
       timeout-minutes: 5
