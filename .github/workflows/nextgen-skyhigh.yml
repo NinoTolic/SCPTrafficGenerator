@@ -321,37 +321,76 @@ jobs:
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
         "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
 
-        # Open each site in isolated Chrome process and enforce timeout
+        function Invoke-ChromeUrlSync {
+          param(
+            [string]$BrowserPath,
+            [string]$Url,
+            [string]$ProfileDir,
+            [int]$TimeoutSeconds
+          )
+
+          $args = @(
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--window-size=1920,1080",
+            "--remote-allow-origins=*",
+            "--user-data-dir=$ProfileDir",
+            "--dump-dom",
+            $Url
+          )
+
+          $outFile = Join-Path $env:RUNNER_TEMP ("chrome-out-" + [guid]::NewGuid().ToString() + ".log")
+          $errFile = Join-Path $env:RUNNER_TEMP ("chrome-err-" + [guid]::NewGuid().ToString() + ".log")
+          $proc = Start-Process -FilePath $BrowserPath -ArgumentList $args -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+
+          if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+            cmd /c "taskkill /PID $($proc.Id) /T /F >nul 2>nul"
+            return [pscustomobject]@{
+              TimedOut = $true
+              ExitCode = $null
+              StdOut   = ""
+              StdErr   = "Timed out after $TimeoutSeconds seconds."
+            }
+          }
+
+          $stdout = if (Test-Path $outFile) { Get-Content -Raw $outFile } else { "" }
+          $stderr = if (Test-Path $errFile) { Get-Content -Raw $errFile } else { "" }
+          Remove-Item -Path $outFile, $errFile -ErrorAction SilentlyContinue
+          return [pscustomobject]@{
+            TimedOut = $false
+            ExitCode = $proc.ExitCode
+            StdOut   = $stdout
+            StdErr   = $stderr
+          }
+        }
+
+        # Open each site synchronously and kill full process tree on timeout
         foreach ($site in $selected) {
           $urlIndex++
           $ts = Get-Date -Format o
           $profileDir = Join-Path $env:RUNNER_TEMP ("chrome-profile-" + $urlIndex + "-" + [guid]::NewGuid().ToString())
           New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
           try {
-            $proc = Start-Process -FilePath $env:BROWSER_EXE -ArgumentList @(
-              "--headless=new",
-              "--disable-gpu",
-              "--no-sandbox",
-              "--no-first-run",
-              "--no-default-browser-check",
-              "--window-size=1920,1080",
-              "--remote-allow-origins=*",
-              "--user-data-dir=$profileDir",
-              $site
-            ) -PassThru -ErrorAction Stop
+            Write-Host "URL $urlIndex/$($selected.Count) start: $site"
+            $result = Invoke-ChromeUrlSync -BrowserPath $env:BROWSER_EXE -Url $site -ProfileDir $profileDir -TimeoutSeconds $perUrlTimeoutSeconds
 
-            if (-not $proc.WaitForExit($perUrlTimeoutSeconds * 1000)) {
-              try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
+            if ($result.TimedOut) {
               $failureCount++
-              "[$ts] URL $urlIndex/$($selected.Count) TIMEOUT after $perUrlTimeoutSeconds s: $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL timed out: $site (PID $($proc.Id))"
-            } elseif ($proc.ExitCode -eq 0) {
+              "[$ts] URL $urlIndex/$($selected.Count) TIMEOUT after $perUrlTimeoutSeconds s: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+              Write-Host "URL timed out: $site"
+            } elseif ($result.ExitCode -eq 0) {
               $successCount++
-              "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+              "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+              Write-Host "URL $urlIndex/$($selected.Count) success: $site"
             } else {
               $failureCount++
-              "[$ts] URL $urlIndex/$($selected.Count) FAILED exit=$($proc.ExitCode): $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL launch failed with exit code $($proc.ExitCode): $site"
+              $errSummary = ($result.StdErr -replace "\r?\n", " ").Trim()
+              if ($errSummary.Length -gt 400) { $errSummary = $errSummary.Substring(0,400) + "..." }
+              "[$ts] URL $urlIndex/$($selected.Count) FAILED exit=$($result.ExitCode): $site :: $errSummary" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+              Write-Host "URL failed with exit code $($result.ExitCode): $site"
             }
           } catch {
             $failureCount++
