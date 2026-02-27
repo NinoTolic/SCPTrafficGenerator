@@ -38,6 +38,13 @@ jobs:
         Write-Host "::endgroup::"
         Get-FileHash ScpInstaller.x64.msi, scp-policy-skyhigh-nextgen-policy-157.opg, CA_Skyhigh.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
+    - name: Deploy OPG Policy
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        New-Item -ItemType Directory -Path "C:\ProgramData\Skyhigh\SCP\Policy\Temp" -Force | Out-Null
+        Copy-Item -Path "./scp-policy-skyhigh-nextgen-policy-157.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg" -Force
+
     - name: Install Root CA
       timeout-minutes: 5
       shell: pwsh
@@ -166,136 +173,37 @@ jobs:
           "Post-install service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         }
 
-    - name: Deploy OPG Policy
-      shell: pwsh
-      run: |
-        $ErrorActionPreference = "Stop"
-        New-Item -ItemType Directory -Path "C:\ProgramData\Skyhigh\SCP\Policy\Temp" -Force | Out-Null
-        Copy-Item -Path "./scp-policy-skyhigh-nextgen-policy-157.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
-
     - name: Check SCP Connection Status
       id: check_scp
-      timeout-minutes: 5
+      timeout-minutes: 2
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
-        $regCliPath = "HKLM\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
-        $registryMaxRetries = 9
-        $regQueryTimeoutSeconds = 20
-        $isConnected = $false
-
-        function Invoke-RegQuerySafe {
-            param(
-                [string]$Arguments,
-                [int]$TimeoutSeconds,
-                [string]$Label
-            )
-
-            $outFile = Join-Path $env:RUNNER_TEMP ("reg-out-" + [guid]::NewGuid().ToString() + ".log")
-            $errFile = Join-Path $env:RUNNER_TEMP ("reg-err-" + [guid]::NewGuid().ToString() + ".log")
-            $proc = Start-Process -FilePath "reg.exe" -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
-
-            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-            $lastLoggedBucket = -1
-            while (-not $proc.WaitForExit(1000)) {
-                $elapsedSec = [int][Math]::Floor($stopwatch.Elapsed.TotalSeconds)
-                if ($elapsedSec -ge $TimeoutSeconds) {
-                    try { $proc.Kill() } catch {}
-                    throw "$Label timed out after $TimeoutSeconds seconds. Arguments: $Arguments"
-                }
-                $bucket = [int]($elapsedSec / 5)
-                if ($bucket -ne $lastLoggedBucket) {
-                    Write-Host "$Label in progress... ${elapsedSec}s"
-                    $lastLoggedBucket = $bucket
-                }
-            }
-
-            $stdout = if (Test-Path $outFile) { Get-Content -Raw $outFile } else { "" }
-            $stderr = if (Test-Path $errFile) { Get-Content -Raw $errFile } else { "" }
-            Remove-Item $outFile, $errFile -ErrorAction SilentlyContinue
-            return [pscustomobject]@{
-                ExitCode = $proc.ExitCode
-                StdOut   = $stdout
-                StdErr   = $stderr
-            }
-        }
 
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
-        Write-Host "Starting registry-based SCP status checks"
-        "Starting registry-based SCP status checks" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Starting single-pass SCP status check" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-        try {
-            Write-Host "Registry dump started via reg.exe query"
-            "Registry dump started via reg.exe query" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            $dumpResult = Invoke-RegQuerySafe -Arguments "query `"$regCliPath`"" -TimeoutSeconds $regQueryTimeoutSeconds -Label "Registry dump query"
-            $aboutText = (($dumpResult.StdOut + $dumpResult.StdErr).Trim())
-            Write-Host "SCP About registry dump:"
-            Write-Host $aboutText
-            "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        $about = Get-ItemProperty -Path $regPath -ErrorAction Stop
+        $aboutText = $about | Format-List * | Out-String
+        Write-Host "SCP About registry dump:"
+        Write-Host $aboutText
+        "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-            $initialStatusMatch = [regex]::Match($aboutText, "^\s*$valueName\s+REG_\w+\s+(.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline)
-            if ($initialStatusMatch.Success) {
-                $initialStatus = $initialStatusMatch.Groups[1].Value.Trim()
-                Write-Host "Initial registry dump status: '$initialStatus'"
-                "Initial registry dump status: $initialStatus" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-                if ($initialStatus -eq "Secure") {
-                    $isConnected = $true
-                    "is_connected=true" >> $env:GITHUB_OUTPUT
-                    Write-Host "SCP status already Secure in initial dump. Skipping retries."
-                    Write-Host "::endgroup::"
-                    exit 0
-                }
-            } else {
-                Write-Host "Initial registry dump did not contain '$valueName'."
-                "Initial registry dump did not contain '$valueName'." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            }
-        } catch {
-            Write-Host "Failed to dump registry key ${regPath}: $($_.Exception.Message)"
-            "Failed to dump registry key ${regPath}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        }
+        $status = [string]$about.$valueName
+        Write-Host "SCP status: '$status'"
+        "SCP status single-pass: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-        for ($attempt = 1; $attempt -le ($registryMaxRetries + 1); $attempt++) {
-            $ts = Get-Date -Format o
-            Write-Host "Registry check attempt $attempt/$($registryMaxRetries + 1) started at $ts"
-            "Registry check attempt $attempt/$($registryMaxRetries + 1) started at ${ts}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            try {
-                $queryResult = Invoke-RegQuerySafe -Arguments "query `"$regCliPath`"" -TimeoutSeconds $regQueryTimeoutSeconds -Label "Registry status query"
-                $raw = (($queryResult.StdOut + $queryResult.StdErr).Trim())
-                if ($queryResult.ExitCode -ne 0) {
-                    throw "reg.exe exit code $($queryResult.ExitCode). Raw output: $raw"
-                }
-                $statusMatch = [regex]::Match($raw, "^\s*$valueName\s+REG_\w+\s+(.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline)
-                if (-not $statusMatch.Success) {
-                    throw "Could not parse '$valueName' from reg.exe output. Raw output: $raw"
-                }
-                $status = $statusMatch.Groups[1].Value.Trim()
-                Write-Host "Registry attempt $attempt/$($registryMaxRetries + 1) status: '$status' at $ts"
-                "SCP status attempt $attempt at ${ts}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-                if ($status -eq "Secure") {
-                    $isConnected = $true
-                    break
-                }
-            } catch {
-                Write-Host "Registry attempt $attempt/$($registryMaxRetries + 1) read failed: $($_.Exception.Message)"
-                "SCP status attempt $attempt failed at ${ts}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            }
-
-            if ($attempt -le $registryMaxRetries) {
-                Write-Host "SCP not secure yet. Retrying registry check immediately (runner wait disabled)."
-            }
-        }
-
-        if ($isConnected) {
-            "is_connected=true" >> $env:GITHUB_OUTPUT
+        if ($status -eq "Secure") {
+          "is_connected=true" >> $env:GITHUB_OUTPUT
         } else {
-            "is_connected=false" >> $env:GITHUB_OUTPUT
-            Write-Host "::endgroup::"
-            throw "SCP status did not become Secure after $($registryMaxRetries + 1) attempts."
+          "is_connected=false" >> $env:GITHUB_OUTPUT
+          Write-Host "::endgroup::"
+          throw "SCP status is not Secure. Current value: '$status'"
         }
         Write-Host "::endgroup::"
 
@@ -323,12 +231,11 @@ jobs:
         # Load the list of URLs from the JSON file
         $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
 
-        # Select 10 random URLs for runner stability
-        $selected = Get-Random -InputObject $topSites -Count 10
+        # Select 30 random URLs
+        $selected = Get-Random -InputObject $topSites -Count 30
         $successCount = 0
         $failureCount = 0
         $urlIndex = 0
-        $perUrlTimeoutSeconds = 20
 
         "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
@@ -338,83 +245,20 @@ jobs:
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
         "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
 
-        function Invoke-ChromeUrlSync {
-          param(
-            [string]$BrowserPath,
-            [string]$Url,
-            [string]$ProfileDir,
-            [int]$TimeoutSeconds
-          )
-
-          $args = @(
-            "--headless=new",
-            "--disable-gpu",
-            "--no-sandbox",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--window-size=1920,1080",
-            "--remote-allow-origins=*",
-            "--user-data-dir=$ProfileDir",
-            "--dump-dom",
-            $Url
-          )
-
-          $outFile = Join-Path $env:RUNNER_TEMP ("chrome-out-" + [guid]::NewGuid().ToString() + ".log")
-          $errFile = Join-Path $env:RUNNER_TEMP ("chrome-err-" + [guid]::NewGuid().ToString() + ".log")
-          $proc = Start-Process -FilePath $BrowserPath -ArgumentList $args -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
-
-          if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-            cmd /c "taskkill /PID $($proc.Id) /T /F >nul 2>nul"
-            return [pscustomobject]@{
-              TimedOut = $true
-              ExitCode = $null
-              StdOut   = ""
-              StdErr   = "Timed out after $TimeoutSeconds seconds."
-            }
-          }
-
-          $stdout = if (Test-Path $outFile) { Get-Content -Raw $outFile } else { "" }
-          $stderr = if (Test-Path $errFile) { Get-Content -Raw $errFile } else { "" }
-          Remove-Item -Path $outFile, $errFile -ErrorAction SilentlyContinue
-          return [pscustomobject]@{
-            TimedOut = $false
-            ExitCode = $proc.ExitCode
-            StdOut   = $stdout
-            StdErr   = $stderr
-          }
-        }
-
-        # Open each site synchronously and kill full process tree on timeout
+        # Open each site in Chrome
         foreach ($site in $selected) {
           $urlIndex++
           $ts = Get-Date -Format o
-          $profileDir = Join-Path $env:RUNNER_TEMP ("chrome-profile-" + $urlIndex + "-" + [guid]::NewGuid().ToString())
-          New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
           try {
-            Write-Host "URL $urlIndex/$($selected.Count) start: $site"
-            $result = Invoke-ChromeUrlSync -BrowserPath $env:BROWSER_EXE -Url $site -ProfileDir $profileDir -TimeoutSeconds $perUrlTimeoutSeconds
-
-            if ($result.TimedOut) {
-              $failureCount++
-              "[$ts] URL $urlIndex/$($selected.Count) TIMEOUT after $perUrlTimeoutSeconds s: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL timed out: $site"
-            } elseif ($result.ExitCode -eq 0) {
-              $successCount++
-              "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL $urlIndex/$($selected.Count) success: $site"
-            } else {
-              $failureCount++
-              $errSummary = ($result.StdErr -replace "\r?\n", " ").Trim()
-              if ($errSummary.Length -gt 400) { $errSummary = $errSummary.Substring(0,400) + "..." }
-              "[$ts] URL $urlIndex/$($selected.Count) FAILED exit=$($result.ExitCode): $site :: $errSummary" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL failed with exit code $($result.ExitCode): $site"
-            }
+            Start-Process -FilePath $env:BROWSER_EXE -ArgumentList "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site" -ErrorAction Stop | Out-Null
+            $successCount++
+            "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
           } catch {
             $failureCount++
             "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
           }
-          Remove-Item -Path $profileDir -Recurse -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 5
         }
 
         "- URL launch success count: $successCount" >> $env:GITHUB_STEP_SUMMARY
