@@ -181,7 +181,7 @@ jobs:
         $ErrorActionPreference = "Stop"
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
-        $maxAttempts = 10
+        $maxAttempts = 25
         $isConnected = $false
 
         Write-Host "::group::SCP Connection Diagnostics"
