@@ -38,54 +38,6 @@ jobs:
         Write-Host "::endgroup::"
         Get-FileHash ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-    - name: Pre-install service snapshot
-      shell: pwsh
-      run: |
-        "=== Pre-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        try {
-          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
-            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        } catch {
-          "Service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        }
-        "=== Pre-install processes ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        try {
-          Get-Process -Name "*scp*", "*skyhigh*", "chrome" -ErrorAction SilentlyContinue |
-            Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        } catch {
-          "Process snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        }
-
-    - name: Install Windows SCP application
-      shell: pwsh
-      run: |
-        $ErrorActionPreference = "Stop"
-        Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /q" -wait
-
-    - name: Post-install service snapshot
-      shell: pwsh
-      run: |
-        Write-Host "::group::Post-install services"
-        try {
-          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue | Format-Table Name,DisplayName,Status,StartType -AutoSize
-        } catch {
-          Write-Host "Post-install service snapshot failed: $($_.Exception.Message)"
-        }
-        Write-Host "::endgroup::"
-        "=== Post-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        try {
-          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
-            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        } catch {
-          "Post-install service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        }
-
-    - name: Deploy OPG Policy
-      shell: pwsh
-      run: |
-        $ErrorActionPreference = "Stop"
-        Copy-Item -Path "./scp-policy-mcafee-nextgen-runner-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
-
     - name: Install Root CA
       timeout-minutes: 5
       shell: pwsh
@@ -132,6 +84,71 @@ jobs:
         "- Import started: $ts" >> $env:GITHUB_STEP_SUMMARY
         "- Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))" >> $env:GITHUB_STEP_SUMMARY
         Write-Host "::endgroup::"
+
+    - name: Pre-install service snapshot
+      shell: pwsh
+      run: |
+        "=== Pre-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+        "=== Pre-install processes ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Process -Name "*scp*", "*skyhigh*", "chrome" -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Process snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
+    - name: Install Windows SCP application
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $msi = Start-Process msiexec -ArgumentList "/i ScpInstaller.x64.msi /q" -PassThru -Wait
+        Write-Host "msiexec exit code: $($msi.ExitCode)"
+        "msiexec exit code: $($msi.ExitCode)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        if ($msi.ExitCode -ne 0) {
+          throw "msiexec failed with exit code $($msi.ExitCode)."
+        }
+
+    - name: Verify SCP installation
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $svc = Get-Service -Name "scpservice" -ErrorAction SilentlyContinue
+        if (-not $svc) {
+          throw "SCP installation verification failed: service 'scpservice' not found."
+        }
+        Write-Host "SCP service found: $($svc.Name), Status=$($svc.Status), StartType=$($svc.StartType)"
+        "SCP service found post-install: $($svc.Name), Status=$($svc.Status), StartType=$($svc.StartType)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+    - name: Post-install service snapshot
+      shell: pwsh
+      run: |
+        Write-Host "::group::Post-install services"
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue | Format-Table Name,DisplayName,Status,StartType -AutoSize
+        } catch {
+          Write-Host "Post-install service snapshot failed: $($_.Exception.Message)"
+        }
+        Write-Host "::endgroup::"
+        "=== Post-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Post-install service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
+    - name: Deploy OPG Policy
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        New-Item -ItemType Directory -Path "C:\ProgramData\Skyhigh\SCP\Policy\Temp" -Force | Out-Null
+        Copy-Item -Path "./scp-policy-mcafee-nextgen-runner-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
     - name: Check SCP Connection Status
       id: check_scp
