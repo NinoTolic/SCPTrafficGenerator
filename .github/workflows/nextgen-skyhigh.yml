@@ -237,6 +237,23 @@ jobs:
             Write-Host $aboutText
             "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+            $initialStatusMatch = [regex]::Match($aboutText, "^\s*$valueName\s+REG_\w+\s+(.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            if ($initialStatusMatch.Success) {
+                $initialStatus = $initialStatusMatch.Groups[1].Value.Trim()
+                Write-Host "Initial registry dump status: '$initialStatus'"
+                "Initial registry dump status: $initialStatus" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+                if ($initialStatus -eq "Secure") {
+                    $isConnected = $true
+                    "is_connected=true" >> $env:GITHUB_OUTPUT
+                    Write-Host "SCP status already Secure in initial dump. Skipping retries."
+                    Write-Host "::endgroup::"
+                    exit 0
+                }
+            } else {
+                Write-Host "Initial registry dump did not contain '$valueName'."
+                "Initial registry dump did not contain '$valueName'." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            }
         } catch {
             Write-Host "Failed to dump registry key ${regPath}: $($_.Exception.Message)"
             "Failed to dump registry key ${regPath}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
@@ -247,7 +264,7 @@ jobs:
             Write-Host "Registry check attempt $attempt/$($registryMaxRetries + 1) started at $ts"
             "Registry check attempt $attempt/$($registryMaxRetries + 1) started at ${ts}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             try {
-                $queryResult = Invoke-RegQuerySafe -Arguments "query `"$regCliPath`" /v $valueName" -TimeoutSeconds $regQueryTimeoutSeconds -Label "Registry status query"
+                $queryResult = Invoke-RegQuerySafe -Arguments "query `"$regCliPath`"" -TimeoutSeconds $regQueryTimeoutSeconds -Label "Registry status query"
                 $raw = (($queryResult.StdOut + $queryResult.StdErr).Trim())
                 if ($queryResult.ExitCode -ne 0) {
                     throw "reg.exe exit code $($queryResult.ExitCode). Raw output: $raw"
