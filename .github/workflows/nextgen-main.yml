@@ -195,7 +195,7 @@ jobs:
 
             for ($remaining = $Seconds; $remaining -gt 0; $remaining--) {
                 Write-Host "$Reason - next attempt in ${remaining}s"
-                cmd /c "timeout /t 1 /nobreak >nul"
+                cmd /c "ping -n 2 127.0.0.1 >nul"
             }
         }
 
@@ -206,17 +206,9 @@ jobs:
                 [string]$Label
             )
 
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = "reg.exe"
-            $psi.Arguments = $Arguments
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow = $true
-
-            $proc = New-Object System.Diagnostics.Process
-            $proc.StartInfo = $psi
-            [void]$proc.Start()
+            $outFile = Join-Path $env:RUNNER_TEMP ("reg-out-" + [guid]::NewGuid().ToString() + ".log")
+            $errFile = Join-Path $env:RUNNER_TEMP ("reg-err-" + [guid]::NewGuid().ToString() + ".log")
+            $proc = Start-Process -FilePath "reg.exe" -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
 
             $elapsed = 0
             while (-not $proc.HasExited) {
@@ -227,12 +219,13 @@ jobs:
                 if (($elapsed % 5) -eq 0) {
                     Write-Host "$Label in progress... ${elapsed}s"
                 }
-                cmd /c "timeout /t 1 /nobreak >nul"
+                cmd /c "ping -n 2 127.0.0.1 >nul"
                 $elapsed++
             }
 
-            $stdout = $proc.StandardOutput.ReadToEnd()
-            $stderr = $proc.StandardError.ReadToEnd()
+            $stdout = if (Test-Path $outFile) { Get-Content -Raw $outFile } else { "" }
+            $stderr = if (Test-Path $errFile) { Get-Content -Raw $errFile } else { "" }
+            Remove-Item $outFile, $errFile -ErrorAction SilentlyContinue
             return [pscustomobject]@{
                 ExitCode = $proc.ExitCode
                 StdOut   = $stdout
