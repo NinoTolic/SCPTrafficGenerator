@@ -183,21 +183,8 @@ jobs:
         $regCliPath = "HKLM\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
         $registryMaxRetries = 3
-        $registryRetryDelaySeconds = 15
         $regQueryTimeoutSeconds = 20
         $isConnected = $false
-
-        function Wait-WithHeartbeat {
-            param(
-                [int]$Seconds,
-                [string]$Reason
-            )
-            $startTs = Get-Date -Format o
-            Write-Host "$Reason started at $startTs. Waiting $Seconds seconds..."
-            [void][System.Threading.Tasks.Task]::Delay([TimeSpan]::FromSeconds($Seconds)).Wait()
-            $endTs = Get-Date -Format o
-            Write-Host "$Reason finished at $endTs."
-        }
 
         function Invoke-RegQuerySafe {
             param(
@@ -282,8 +269,7 @@ jobs:
             }
 
             if ($attempt -le $registryMaxRetries) {
-                Write-Host "SCP not secure yet. Retrying registry check in $registryRetryDelaySeconds seconds..."
-                Wait-WithHeartbeat -Seconds $registryRetryDelaySeconds -Reason "Registry check retry wait"
+                Write-Host "SCP not secure yet. Retrying registry check immediately (runner wait disabled)."
             }
         }
 
