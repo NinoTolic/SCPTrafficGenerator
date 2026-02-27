@@ -226,8 +226,8 @@ jobs:
             "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         } catch {
-            Write-Host "Failed to dump registry key $regPath: $($_.Exception.Message)"
-            "Failed to dump registry key $regPath: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "Failed to dump registry key ${regPath}: $($_.Exception.Message)"
+            "Failed to dump registry key ${regPath}: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         }
 
         for ($attempt = 1; $attempt -le ($registryMaxRetries + 1); $attempt++) {
