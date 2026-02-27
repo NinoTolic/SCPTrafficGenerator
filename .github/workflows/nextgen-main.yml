@@ -174,10 +174,15 @@ jobs:
         Copy-Item -Path "./scp-policy-mcafee-nextgen-runner-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
     - name: Wait before SCP connectivity check
+      timeout-minutes: 1
       shell: pwsh
       run: |
         Write-Host "Waiting 15 seconds before SCP connectivity check..."
-        Start-Sleep -Seconds 15
+        for ($i = 15; $i -ge 1; $i--) {
+          Write-Host "Pre-check wait: ${i}s remaining"
+          Start-Sleep -Seconds 1
+        }
+        Write-Host "Pre-check wait completed."
 
     - name: Check SCP Connection Status
       id: check_scp
