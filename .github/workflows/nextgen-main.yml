@@ -192,11 +192,11 @@ jobs:
                 [int]$Seconds,
                 [string]$Reason
             )
-
-            for ($remaining = $Seconds; $remaining -gt 0; $remaining--) {
-                Write-Host "$Reason - next attempt in ${remaining}s"
-                [System.Threading.Thread]::Sleep(1000)
-            }
+            $startTs = Get-Date -Format o
+            Write-Host "$Reason started at $startTs. Waiting $Seconds seconds..."
+            [void][System.Threading.Tasks.Task]::Delay([TimeSpan]::FromSeconds($Seconds)).Wait()
+            $endTs = Get-Date -Format o
+            Write-Host "$Reason finished at $endTs."
         }
 
         function Invoke-RegQuerySafe {
