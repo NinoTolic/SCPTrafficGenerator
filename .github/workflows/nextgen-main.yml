@@ -240,7 +240,6 @@ jobs:
 
     - name: Access top websites from external list
       if: steps.check_scp.outputs.is_connected == 'true'
-      timeout-minutes: 5
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
@@ -256,7 +255,6 @@ jobs:
         $successCount = 0
         $failureCount = 0
         $urlIndex = 0
-        $perUrlTimeoutSeconds = 25
 
         "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
@@ -266,46 +264,20 @@ jobs:
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
         "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
 
-        # Open each site sequentially, enforce timeout, and kill browser tree after each URL
+        # Open each site in Chrome
         foreach ($site in $selected) {
           $urlIndex++
           $ts = Get-Date -Format o
-          $proc = $null
           try {
-            Write-Host "URL $urlIndex/$($selected.Count) start: $site"
-            $proc = Start-Process -FilePath $env:BROWSER_EXE -ArgumentList @(
-              "--headless=new",
-              "--disable-gpu",
-              "--no-sandbox",
-              "--window-size=1920,1080",
-              "--remote-allow-origins=*",
-              "--dump-dom",
-              $site
-            ) -PassThru -ErrorAction Stop
-
-            if (-not $proc.WaitForExit($perUrlTimeoutSeconds * 1000)) {
-              $failureCount++
-              "[$ts] URL $urlIndex/$($selected.Count) TIMEOUT after $perUrlTimeoutSeconds s: $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL timeout: $site (PID $($proc.Id))"
-            } elseif ($proc.ExitCode -eq 0) {
-              $successCount++
-              "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL $urlIndex/$($selected.Count) success: $site"
-            } else {
-              $failureCount++
-              "[$ts] URL $urlIndex/$($selected.Count) FAILED exit=$($proc.ExitCode): $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-              Write-Host "URL failed exit=$($proc.ExitCode): $site"
-            }
+            Start-Process -FilePath $env:BROWSER_EXE -ArgumentList "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site" -ErrorAction Stop | Out-Null
+            $successCount++
+            "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
           } catch {
             $failureCount++
             "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
-          } finally {
-            if ($proc -and -not $proc.HasExited) {
-              cmd /c "taskkill /PID $($proc.Id) /T /F >nul 2>nul"
-            }
-            cmd /c "taskkill /IM chrome.exe /T /F >nul 2>nul"
           }
+          Start-Sleep -Seconds 5
         }
 
         "- URL launch success count: $successCount" >> $env:GITHUB_STEP_SUMMARY
