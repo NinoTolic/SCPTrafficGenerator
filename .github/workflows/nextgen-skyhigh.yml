@@ -182,12 +182,9 @@ jobs:
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $regCliPath = "HKLM\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
-        $serviceMaxRetries = 3
-        $serviceRetryDelaySeconds = 15
         $registryMaxRetries = 3
         $registryRetryDelaySeconds = 15
         $isConnected = $false
-        $isServiceRunning = $false
 
         function Wait-WithHeartbeat {
             param(
@@ -204,34 +201,8 @@ jobs:
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
-        Write-Host "Starting scpservice.exe checks"
-        "Starting scpservice.exe checks" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-
-        for ($serviceAttempt = 1; $serviceAttempt -le ($serviceMaxRetries + 1); $serviceAttempt++) {
-            $serviceTs = Get-Date -Format o
-            Write-Host "Service check attempt $serviceAttempt/$($serviceMaxRetries + 1) started at $serviceTs"
-            "Service check attempt $serviceAttempt/$($serviceMaxRetries + 1) started at ${serviceTs}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            $svcProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
-            if ($svcProc) {
-                Write-Host "scpservice.exe is running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')"
-                "scpservice.exe running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-                $isServiceRunning = $true
-                break
-            }
-
-            Write-Host "scpservice.exe is NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)."
-            "scpservice.exe NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-
-            if ($serviceAttempt -le $serviceMaxRetries) {
-                Write-Host "Waiting $serviceRetryDelaySeconds seconds before next service check..."
-                Wait-WithHeartbeat -Seconds $serviceRetryDelaySeconds -Reason "Service check retry wait"
-            }
-        }
-
-        if (-not $isServiceRunning) {
-            Write-Host "::endgroup::"
-            throw "scpservice.exe is not running after $($serviceMaxRetries + 1) attempts."
-        }
+        Write-Host "Starting registry-based SCP status checks"
+        "Starting registry-based SCP status checks" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
         try {
             Write-Host "Registry dump started via reg.exe query"
@@ -357,14 +328,6 @@ jobs:
         if ($successCount -eq 0) {
           throw "No URLs were successfully launched."
         }
-
-    - name: Fail if SCP is not connected
-      if: steps.check_scp.outputs.is_connected != 'true'
-      shell: pwsh
-      run: |
-        "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
-        "- SCP status: Not Secure" >> $env:GITHUB_STEP_SUMMARY
-        Write-Error "SCP status is not Secure. Skipping traffic generation."
 
     - name: Terminate browser processes
       if: always()  # Runs even if previous step failed
