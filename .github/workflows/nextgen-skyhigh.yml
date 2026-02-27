@@ -195,7 +195,7 @@ jobs:
 
             for ($remaining = $Seconds; $remaining -gt 0; $remaining--) {
                 Write-Host "$Reason - next attempt in ${remaining}s"
-                cmd /c "ping -n 2 127.0.0.1 >nul"
+                [System.Threading.Thread]::Sleep(1000)
             }
         }
 
@@ -210,17 +210,19 @@ jobs:
             $errFile = Join-Path $env:RUNNER_TEMP ("reg-err-" + [guid]::NewGuid().ToString() + ".log")
             $proc = Start-Process -FilePath "reg.exe" -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
 
-            $elapsed = 0
-            while (-not $proc.HasExited) {
-                if ($elapsed -ge $TimeoutSeconds) {
+            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            $lastLoggedBucket = -1
+            while (-not $proc.WaitForExit(1000)) {
+                $elapsedSec = [int][Math]::Floor($stopwatch.Elapsed.TotalSeconds)
+                if ($elapsedSec -ge $TimeoutSeconds) {
                     try { $proc.Kill() } catch {}
                     throw "$Label timed out after $TimeoutSeconds seconds. Arguments: $Arguments"
                 }
-                if (($elapsed % 5) -eq 0) {
-                    Write-Host "$Label in progress... ${elapsed}s"
+                $bucket = [int]($elapsedSec / 5)
+                if ($bucket -ne $lastLoggedBucket) {
+                    Write-Host "$Label in progress... ${elapsedSec}s"
+                    $lastLoggedBucket = $bucket
                 }
-                cmd /c "ping -n 2 127.0.0.1 >nul"
-                $elapsed++
             }
 
             $stdout = if (Test-Path $outFile) { Get-Content -Raw $outFile } else { "" }
