@@ -173,6 +173,12 @@ jobs:
         New-Item -ItemType Directory -Path "C:\ProgramData\Skyhigh\SCP\Policy\Temp" -Force | Out-Null
         Copy-Item -Path "./scp-policy-mcafee-nextgen-runner-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg"
 
+    - name: Wait before SCP connectivity check
+      shell: pwsh
+      run: |
+        Write-Host "Waiting 15 seconds before SCP connectivity check..."
+        Start-Sleep -Seconds 15
+
     - name: Check SCP Connection Status
       id: check_scp
       timeout-minutes: 3
@@ -184,6 +190,7 @@ jobs:
         $valueName = "Status"
         $registryMaxRetries = 3
         $registryRetryDelaySeconds = 15
+        $regQueryTimeoutSeconds = 20
         $isConnected = $false
 
         function Wait-WithHeartbeat {
@@ -198,6 +205,47 @@ jobs:
             }
         }
 
+        function Invoke-RegQuerySafe {
+            param(
+                [string]$Arguments,
+                [int]$TimeoutSeconds,
+                [string]$Label
+            )
+
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "reg.exe"
+            $psi.Arguments = $Arguments
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+
+            $proc = New-Object System.Diagnostics.Process
+            $proc.StartInfo = $psi
+            [void]$proc.Start()
+
+            $elapsed = 0
+            while (-not $proc.HasExited) {
+                if ($elapsed -ge $TimeoutSeconds) {
+                    try { $proc.Kill() } catch {}
+                    throw "$Label timed out after $TimeoutSeconds seconds. Arguments: $Arguments"
+                }
+                if (($elapsed % 5) -eq 0) {
+                    Write-Host "$Label in progress... ${elapsed}s"
+                }
+                Start-Sleep -Seconds 1
+                $elapsed++
+            }
+
+            $stdout = $proc.StandardOutput.ReadToEnd()
+            $stderr = $proc.StandardError.ReadToEnd()
+            return [pscustomobject]@{
+                ExitCode = $proc.ExitCode
+                StdOut   = $stdout
+                StdErr   = $stderr
+            }
+        }
+
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
@@ -207,7 +255,8 @@ jobs:
         try {
             Write-Host "Registry dump started via reg.exe query"
             "Registry dump started via reg.exe query" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            $aboutText = reg.exe query $regCliPath 2>&1 | Out-String
+            $dumpResult = Invoke-RegQuerySafe -Arguments "query `"$regCliPath`"" -TimeoutSeconds $regQueryTimeoutSeconds -Label "Registry dump query"
+            $aboutText = (($dumpResult.StdOut + $dumpResult.StdErr).Trim())
             Write-Host "SCP About registry dump:"
             Write-Host $aboutText
             "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
@@ -222,7 +271,11 @@ jobs:
             Write-Host "Registry check attempt $attempt/$($registryMaxRetries + 1) started at $ts"
             "Registry check attempt $attempt/$($registryMaxRetries + 1) started at ${ts}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             try {
-                $raw = reg.exe query $regCliPath /v $valueName 2>&1 | Out-String
+                $queryResult = Invoke-RegQuerySafe -Arguments "query `"$regCliPath`" /v $valueName" -TimeoutSeconds $regQueryTimeoutSeconds -Label "Registry status query"
+                $raw = (($queryResult.StdOut + $queryResult.StdErr).Trim())
+                if ($queryResult.ExitCode -ne 0) {
+                    throw "reg.exe exit code $($queryResult.ExitCode). Raw output: $raw"
+                }
                 $statusMatch = [regex]::Match($raw, "^\s*$valueName\s+REG_\w+\s+(.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline)
                 if (-not $statusMatch.Success) {
                     throw "Could not parse '$valueName' from reg.exe output. Raw output: $raw"
