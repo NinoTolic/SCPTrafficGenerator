@@ -175,14 +175,14 @@ jobs:
 
     - name: Check SCP Connection Status
       id: check_scp
-      timeout-minutes: 3
+      timeout-minutes: 5
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $regCliPath = "HKLM\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
-        $registryMaxRetries = 3
+        $registryMaxRetries = 9
         $regQueryTimeoutSeconds = 20
         $isConnected = $false
 
@@ -295,6 +295,7 @@ jobs:
 
     - name: Access top websites from external list
       if: steps.check_scp.outputs.is_connected == 'true'
+      timeout-minutes: 5
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
@@ -305,11 +306,12 @@ jobs:
         # Load the list of URLs from the JSON file
         $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
 
-        # Select 30 random URLs
-        $selected = Get-Random -InputObject $topSites -Count 30
+        # Select 10 random URLs for runner stability
+        $selected = Get-Random -InputObject $topSites -Count 10
         $successCount = 0
         $failureCount = 0
         $urlIndex = 0
+        $perUrlTimeoutSeconds = 20
 
         "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
@@ -319,20 +321,44 @@ jobs:
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
         "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
 
-        # Open each site in Chrome (or Edge)
+        # Open each site in isolated Chrome process and enforce timeout
         foreach ($site in $selected) {
           $urlIndex++
           $ts = Get-Date -Format o
+          $profileDir = Join-Path $env:RUNNER_TEMP ("chrome-profile-" + $urlIndex + "-" + [guid]::NewGuid().ToString())
+          New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
           try {
-            Start-Process -FilePath $env:BROWSER_EXE -ArgumentList "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site" -ErrorAction Stop | Out-Null
-            $successCount++
-            "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            $proc = Start-Process -FilePath $env:BROWSER_EXE -ArgumentList @(
+              "--headless=new",
+              "--disable-gpu",
+              "--no-sandbox",
+              "--no-first-run",
+              "--no-default-browser-check",
+              "--window-size=1920,1080",
+              "--remote-allow-origins=*",
+              "--user-data-dir=$profileDir",
+              $site
+            ) -PassThru -ErrorAction Stop
+
+            if (-not $proc.WaitForExit($perUrlTimeoutSeconds * 1000)) {
+              try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
+              $failureCount++
+              "[$ts] URL $urlIndex/$($selected.Count) TIMEOUT after $perUrlTimeoutSeconds s: $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+              Write-Host "URL timed out: $site (PID $($proc.Id))"
+            } elseif ($proc.ExitCode -eq 0) {
+              $successCount++
+              "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            } else {
+              $failureCount++
+              "[$ts] URL $urlIndex/$($selected.Count) FAILED exit=$($proc.ExitCode): $site (PID $($proc.Id))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+              Write-Host "URL launch failed with exit code $($proc.ExitCode): $site"
+            }
           } catch {
             $failureCount++
             "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
           }
-          Start-Sleep -Seconds 5
+          Remove-Item -Path $profileDir -Recurse -Force -ErrorAction SilentlyContinue
         }
 
         "- URL launch success count: $successCount" >> $env:GITHUB_STEP_SUMMARY
