@@ -181,29 +181,49 @@ jobs:
         $ErrorActionPreference = "Stop"
         $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
         $valueName = "Status"
+        $maxAttempts = 10
+        $isConnected = $false
 
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
-        "Starting single-pass SCP status check" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Starting fast multi-attempt SCP status check" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-        $about = Get-ItemProperty -Path $regPath -ErrorAction Stop
-        $aboutText = $about | Format-List * | Out-String
-        Write-Host "SCP About registry dump:"
-        Write-Host $aboutText
-        "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+          $ts = Get-Date -Format o
+          Write-Host "SCP registry read attempt $attempt/$maxAttempts at $ts"
+          "SCP registry read attempt $attempt/$maxAttempts at ${ts}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          try {
+            $about = Get-ItemProperty -Path $regPath -ErrorAction Stop
+            $aboutText = $about | Format-List * | Out-String
+            Write-Host "SCP About registry dump:"
+            Write-Host $aboutText
+            "SCP About registry dump (attempt $attempt):" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-        $status = [string]$about.$valueName
-        Write-Host "SCP status: '$status'"
-        "SCP status single-pass: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            $status = ""
+            if ($about.PSObject.Properties.Name -contains $valueName) {
+              $status = [string]$about.$valueName
+            }
+            Write-Host "SCP status attempt $attempt: '$status'"
+            "SCP status attempt $attempt: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
-        if ($status -eq "Secure") {
+            if ($status -eq "Secure") {
+              $isConnected = $true
+              break
+            }
+          } catch {
+            Write-Host "SCP registry read attempt $attempt failed: $($_.Exception.Message)"
+            "SCP registry read attempt $attempt failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          }
+        }
+
+        if ($isConnected) {
           "is_connected=true" >> $env:GITHUB_OUTPUT
         } else {
           "is_connected=false" >> $env:GITHUB_OUTPUT
           Write-Host "::endgroup::"
-          throw "SCP status is not Secure. Current value: '$status'"
+          throw "SCP status did not become Secure after $maxAttempts attempts."
         }
         Write-Host "::endgroup::"
 
