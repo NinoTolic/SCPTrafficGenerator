@@ -185,21 +185,23 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         Write-Host "::group::Browser Diagnostics"
-        $browserCmd = Get-Command chrome.exe -ErrorAction SilentlyContinue
-        if ($null -eq $browserCmd) {
-          $browserCmd = Get-Command msedge.exe -ErrorAction SilentlyContinue
-        }
+        $chromePaths = @(
+          "C:\Program Files\Google\Chrome\Application\chrome.exe",
+          "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        )
 
-        if ($null -eq $browserCmd) {
-          "No supported browser found (checked chrome.exe, msedge.exe)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        $browserExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $browserExe) {
+          "Chrome executable not found in standard Program Files paths." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
           Write-Host "::endgroup::"
-          throw "No supported browser found (checked chrome.exe, msedge.exe)."
+          throw "Chrome executable not found in standard Program Files paths."
         }
 
-        Write-Host "Selected browser: $($browserCmd.Name) at $($browserCmd.Source)"
-        & $browserCmd.Source --version
-        "Selected browser: $($browserCmd.Source)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        "BROWSER_EXE=$($browserCmd.Source)" >> $env:GITHUB_ENV
+        $browserName = [System.IO.Path]::GetFileName($browserExe)
+        Write-Host "Selected browser: $browserName at $browserExe"
+        & $browserExe --version
+        "Selected browser: $browserExe" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "BROWSER_EXE=$browserExe" >> $env:GITHUB_ENV
         Write-Host "::endgroup::"
 
     - name: Access top websites from external list

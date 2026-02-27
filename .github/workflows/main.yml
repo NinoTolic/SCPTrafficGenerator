@@ -187,54 +187,16 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         Write-Host "::group::Browser Diagnostics"
-        $browserExe = $null
-        $resolveBrowser = {
-          param(
-            [string]$ExeName,
-            [string[]]$KnownPaths,
-            [string[]]$RegPaths
-          )
-
-          $candidates = @()
-          $cmd = Get-Command $ExeName -ErrorAction SilentlyContinue
-          if ($cmd -and $cmd.Source) { $candidates += $cmd.Source }
-          $candidates += $KnownPaths
-
-          foreach ($regPath in $RegPaths) {
-            $regValue = (Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue)."(default)"
-            if ($regValue) { $candidates += $regValue }
-          }
-
-          foreach ($candidate in $candidates) {
-            if ($candidate -and (Test-Path $candidate)) {
-              return $candidate
-            }
-          }
-          return $null
-        }
-
-        $browserExe = & $resolveBrowser "chrome.exe" @(
+        $chromePaths = @(
           "C:\Program Files\Google\Chrome\Application\chrome.exe",
           "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-        ) @(
-          "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
-          "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
         )
 
+        $browserExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
         if (-not $browserExe) {
-          $browserExe = & $resolveBrowser "msedge.exe" @(
-            "C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-          ) @(
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe",
-            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe"
-          )
-        }
-
-        if (-not $browserExe) {
-          "No supported browser found (checked chrome.exe, msedge.exe)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          "Chrome executable not found in standard Program Files paths." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
           Write-Host "::endgroup::"
-          throw "No supported browser found (checked chrome.exe, msedge.exe)."
+          throw "Chrome executable not found in standard Program Files paths."
         }
 
         $browserName = [System.IO.Path]::GetFileName($browserExe)
