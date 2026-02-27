@@ -205,8 +205,8 @@ jobs:
             if ($about.PSObject.Properties.Name -contains $valueName) {
               $status = [string]$about.$valueName
             }
-            Write-Host "SCP status attempt $attempt: '$status'"
-            "SCP status attempt $attempt: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "SCP status attempt ${attempt}: '$status'"
+            "SCP status attempt ${attempt}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
             if ($status -eq "Secure") {
               $isConnected = $true
