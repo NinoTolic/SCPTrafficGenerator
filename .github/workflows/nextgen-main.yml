@@ -131,21 +131,21 @@ jobs:
         $ErrorActionPreference = "Stop"
         $found = $false
         for ($attempt = 1; $attempt -le 4; $attempt++) {
-          $proc = Get-Process -Name "spcservice" -ErrorAction SilentlyContinue
+          $proc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
           if ($proc) {
-            Write-Host "spcservice.exe found post-install on attempt $attempt/4. PID(s): $($proc.Id -join ', ')"
-            "spcservice.exe found post-install on attempt $attempt/4. PID(s): $($proc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "scpservice.exe found post-install on attempt $attempt/4. PID(s): $($proc.Id -join ', ')"
+            "scpservice.exe found post-install on attempt $attempt/4. PID(s): $($proc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             $found = $true
             break
           }
 
-          Write-Host "spcservice.exe not found on verify attempt $attempt/4."
-          "spcservice.exe not found on verify attempt $attempt/4." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          Write-Host "scpservice.exe not found on verify attempt $attempt/4."
+          "scpservice.exe not found on verify attempt $attempt/4." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
           if ($attempt -lt 4) { Start-Sleep -Seconds 10 }
         }
 
         if (-not $found) {
-          throw "SCP installation verification failed: process 'spcservice.exe' not found."
+          throw "SCP installation verification failed: process 'scpservice.exe' not found."
         }
 
     - name: Post-install service snapshot
@@ -192,20 +192,20 @@ jobs:
         Write-Host "::group::SCP Connection Diagnostics"
         Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
         Write-Host "Registry path: $regPath"
-        Write-Host "Starting spcservice.exe checks"
-        "Starting spcservice.exe checks" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        Write-Host "Starting scpservice.exe checks"
+        "Starting scpservice.exe checks" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
         for ($serviceAttempt = 1; $serviceAttempt -le ($serviceMaxRetries + 1); $serviceAttempt++) {
-            $svcProc = Get-Process -Name "spcservice" -ErrorAction SilentlyContinue
+            $svcProc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
             if ($svcProc) {
-                Write-Host "spcservice.exe is running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')"
-                "spcservice.exe running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+                Write-Host "scpservice.exe is running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')"
+                "scpservice.exe running on attempt $serviceAttempt/$($serviceMaxRetries + 1). PID(s): $($svcProc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
                 $isServiceRunning = $true
                 break
             }
 
-            Write-Host "spcservice.exe is NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)."
-            "spcservice.exe NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "scpservice.exe is NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)."
+            "scpservice.exe NOT running on attempt $serviceAttempt/$($serviceMaxRetries + 1)." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
             if ($serviceAttempt -le $serviceMaxRetries) {
                 Write-Host "Waiting $serviceRetryDelaySeconds seconds before next service check..."
@@ -215,7 +215,7 @@ jobs:
 
         if (-not $isServiceRunning) {
             Write-Host "::endgroup::"
-            throw "spcservice.exe is not running after $($serviceMaxRetries + 1) attempts."
+            throw "scpservice.exe is not running after $($serviceMaxRetries + 1) attempts."
         }
 
         try {
