@@ -186,36 +186,18 @@ jobs:
         $serviceRetryDelaySeconds = 15
         $registryMaxRetries = 3
         $registryRetryDelaySeconds = 15
-        $registryReadTimeoutSeconds = 10
         $isConnected = $false
         $isServiceRunning = $false
 
-        function Invoke-RegQueryWithTimeout {
+        function Wait-WithHeartbeat {
             param(
-                [string]$KeyPath,
-                [string]$Name,
-                [int]$TimeoutSeconds
+                [int]$Seconds,
+                [string]$Reason
             )
 
-            $job = Start-Job -ScriptBlock {
-                param($innerKeyPath, $innerName)
-                reg.exe query $innerKeyPath /v $innerName 2>&1 | Out-String
-            } -ArgumentList $KeyPath, $Name
-
-            if (Wait-Job -Job $job -Timeout $TimeoutSeconds) {
-                $output = Receive-Job -Job $job
-                Remove-Job -Job $job -Force | Out-Null
-                return [pscustomobject]@{
-                    TimedOut = $false
-                    Output   = $output
-                }
-            }
-
-            Stop-Job -Job $job -ErrorAction SilentlyContinue | Out-Null
-            Remove-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
-            return [pscustomobject]@{
-                TimedOut = $true
-                Output   = ""
+            for ($remaining = $Seconds; $remaining -gt 0; $remaining--) {
+                Write-Host "$Reason - next attempt in ${remaining}s"
+                Start-Sleep -Seconds 1
             }
         }
 
@@ -242,7 +224,7 @@ jobs:
 
             if ($serviceAttempt -le $serviceMaxRetries) {
                 Write-Host "Waiting $serviceRetryDelaySeconds seconds before next service check..."
-                Start-Sleep -Seconds $serviceRetryDelaySeconds
+                Wait-WithHeartbeat -Seconds $serviceRetryDelaySeconds -Reason "Service check retry wait"
             }
         }
 
@@ -254,18 +236,7 @@ jobs:
         try {
             Write-Host "Registry dump started via reg.exe query"
             "Registry dump started via reg.exe query" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            $dumpResult = Start-Job -ScriptBlock {
-                param($innerKeyPath)
-                reg.exe query $innerKeyPath 2>&1 | Out-String
-            } -ArgumentList $regCliPath
-            if (Wait-Job -Job $dumpResult -Timeout $registryReadTimeoutSeconds) {
-                $aboutText = Receive-Job -Job $dumpResult
-                Remove-Job -Job $dumpResult -Force | Out-Null
-            } else {
-                Stop-Job -Job $dumpResult -ErrorAction SilentlyContinue | Out-Null
-                Remove-Job -Job $dumpResult -Force -ErrorAction SilentlyContinue | Out-Null
-                throw "Registry dump timed out after $registryReadTimeoutSeconds seconds."
-            }
+            $aboutText = reg.exe query $regCliPath 2>&1 | Out-String
             Write-Host "SCP About registry dump:"
             Write-Host $aboutText
             "SCP About registry dump:" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
@@ -280,12 +251,7 @@ jobs:
             Write-Host "Registry check attempt $attempt/$($registryMaxRetries + 1) started at $ts"
             "Registry check attempt $attempt/$($registryMaxRetries + 1) started at ${ts}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             try {
-                $query = Invoke-RegQueryWithTimeout -KeyPath $regCliPath -Name $valueName -TimeoutSeconds $registryReadTimeoutSeconds
-                if ($query.TimedOut) {
-                    throw "Registry query timed out after $registryReadTimeoutSeconds seconds."
-                }
-
-                $raw = [string]$query.Output
+                $raw = reg.exe query $regCliPath /v $valueName 2>&1 | Out-String
                 $statusMatch = [regex]::Match($raw, "^\s*$valueName\s+REG_\w+\s+(.+)$", [System.Text.RegularExpressions.RegexOptions]::Multiline)
                 if (-not $statusMatch.Success) {
                     throw "Could not parse '$valueName' from reg.exe output. Raw output: $raw"
@@ -304,7 +270,7 @@ jobs:
 
             if ($attempt -le $registryMaxRetries) {
                 Write-Host "SCP not secure yet. Retrying registry check in $registryRetryDelaySeconds seconds..."
-                Start-Sleep -Seconds $registryRetryDelaySeconds
+                Wait-WithHeartbeat -Seconds $registryRetryDelaySeconds -Reason "Registry check retry wait"
             }
         }
 
