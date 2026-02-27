@@ -287,20 +287,8 @@ jobs:
       run: |
         $ErrorActionPreference = "Stop"
         Write-Host "::group::Browser Diagnostics"
-        $chromePaths = @(
-          "C:\Program Files\Google\Chrome\Application\chrome.exe",
-          "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-        )
-
-        $browserExe = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-        if (-not $browserExe) {
-          "Chrome executable not found in standard Program Files paths." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-          Write-Host "::endgroup::"
-          throw "Chrome executable not found in standard Program Files paths."
-        }
-
-        $browserName = [System.IO.Path]::GetFileName($browserExe)
-        Write-Host "Selected browser: $browserName at $browserExe"
+        $browserExe = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+        Write-Host "Using browser path: $browserExe"
         "Selected browser: $browserExe" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "BROWSER_EXE=$browserExe" >> $env:GITHUB_ENV
         Write-Host "::endgroup::"
