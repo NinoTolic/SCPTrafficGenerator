@@ -66,7 +66,6 @@ jobs:
         $proc = Start-Process -FilePath "certutil.exe" -ArgumentList @("-f", "-addstore", "Root", $caPath) -PassThru -NoNewWindow
         $deadline = (Get-Date).AddSeconds(120)
         while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
-          Start-Sleep -Seconds 5
           Write-Host "certutil still running... elapsed=$([Math]::Round($sw.Elapsed.TotalSeconds, 1))s"
         }
         $completed = $proc.HasExited
@@ -240,6 +239,7 @@ jobs:
 
     - name: Access top websites from external list
       if: steps.check_scp.outputs.is_connected == 'true'
+      timeout-minutes: 8
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
@@ -277,7 +277,6 @@ jobs:
             "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
             Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
           }
-          Start-Sleep -Seconds 5
         }
 
         "- URL launch success count: $successCount" >> $env:GITHUB_STEP_SUMMARY
