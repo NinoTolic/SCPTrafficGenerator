@@ -1,0 +1,305 @@
+name: SCP Traffic Generation - McAfee - NextGen
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2:00 AM UTC
+  workflow_dispatch:
+
+jobs:
+  NextGenSCP-McAfee-run:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize diagnostics
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path diagnostics -Force | Out-Null
+        "Workflow: $env:GITHUB_WORKFLOW" | Out-File -FilePath diagnostics/scp-debug.log -Encoding utf8
+        "Run ID: $env:GITHUB_RUN_ID" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Runner: $env:RUNNER_NAME / $env:RUNNER_OS" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Timestamp: $(Get-Date -Format o)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+    
+    - name: Copy Files Over from Private Repo
+      shell: pwsh
+      env:
+        PAT: ${{ secrets.NewSCPToken }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/ScpInstaller.x64.msi -Headers @{Authorization="Token $($env:PAT)"} -OutFile ScpInstaller.x64.msi
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/scp-policy-mcafee-nextgen-runner-326.opg -Headers @{Authorization="Token $($env:PAT)"} -OutFile scp-policy-mcafee-nextgen-runner-326.opg
+        Invoke-WebRequest -Uri https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/McAfeeTenant/CA_MFE_Tenant.pem -Headers @{Authorization="Token $($env:PAT)"} -OutFile CA_MFE_Tenant.pem
+        Write-Host "::group::Downloaded Files"
+        Get-Item ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize
+        Get-FileHash ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Format-Table -AutoSize
+        Write-Host "::endgroup::"
+        Get-FileHash ScpInstaller.x64.msi, scp-policy-mcafee-nextgen-runner-326.opg, CA_MFE_Tenant.pem -Algorithm SHA256 | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+    - name: Deploy OPG Policy
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        New-Item -ItemType Directory -Path "C:\ProgramData\Skyhigh\SCP\Policy\Temp" -Force | Out-Null
+        Copy-Item -Path "./scp-policy-mcafee-nextgen-runner-326.opg" -Destination "C:\ProgramData\Skyhigh\SCP\Policy\Temp\SCPPolicy.opg" -Force
+
+    - name: Install Root CA
+      timeout-minutes: 5
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $ts = Get-Date -Format o
+        $caPath = "./CA_MFE_Tenant.pem"
+        if (-not (Test-Path $caPath)) {
+          throw "Root CA file not found at $caPath"
+        }
+
+        Write-Host "::group::Root CA install diagnostics"
+        Write-Host "Start: $ts"
+        Get-Item $caPath | Select-Object FullName,Length,LastWriteTime | Format-List
+        Get-FileHash $caPath -Algorithm SHA256 | Format-Table -AutoSize
+
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        Write-Host "Starting certutil addstore..."
+        $proc = Start-Process -FilePath "certutil.exe" -ArgumentList @("-f", "-addstore", "Root", $caPath) -PassThru -NoNewWindow
+        $deadline = (Get-Date).AddSeconds(120)
+        while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
+          Write-Host "certutil still running... elapsed=$([Math]::Round($sw.Elapsed.TotalSeconds, 1))s"
+        }
+        $completed = $proc.HasExited
+        $sw.Stop()
+
+        if (-not $completed) {
+          try { $proc.Kill() } catch { }
+          "certutil timed out after 120 seconds." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          throw "certutil -addstore timed out after 120 seconds."
+        }
+
+        Write-Host "certutil exit code: $($proc.ExitCode)"
+        "certutil exit code: $($proc.ExitCode)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        if ($proc.ExitCode -ne 0) {
+          throw "certutil -addstore failed with exit code $($proc.ExitCode)."
+        }
+
+        Write-Host "Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))"
+        "Root CA import at ${ts}; duration_seconds=$([Math]::Round($sw.Elapsed.TotalSeconds, 2))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "### Root CA Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- Import started: $ts" >> $env:GITHUB_STEP_SUMMARY
+        "- Import duration seconds: $([Math]::Round($sw.Elapsed.TotalSeconds, 2))" >> $env:GITHUB_STEP_SUMMARY
+        Write-Host "::endgroup::"
+
+    - name: Pre-install service snapshot
+      shell: pwsh
+      run: |
+        "=== Pre-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+        "=== Pre-install processes ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Process -Name "*scp*", "*skyhigh*", "chrome" -ErrorAction SilentlyContinue |
+            Select-Object Name,Id,StartTime | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Process snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
+    - name: Install Windows SCP application
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $msiLog = "diagnostics/msi-install.log"
+        if (Test-Path $msiLog) { Remove-Item $msiLog -Force }
+        $msiArgs = @("/i", "ScpInstaller.x64.msi", "/q", "/norestart", "/l*v", $msiLog)
+        Write-Host "Starting msiexec with logging to $msiLog"
+        $msi = Start-Process msiexec -ArgumentList $msiArgs -PassThru -Wait
+        Write-Host "msiexec exit code: $($msi.ExitCode)"
+        "msiexec exit code: $($msi.ExitCode)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        if ($msi.ExitCode -ne 0 -and $msi.ExitCode -ne 3010) {
+          if (Test-Path $msiLog) {
+            Write-Host "msi log tail (last 60 lines):"
+            Get-Content $msiLog -Tail 60 | ForEach-Object { Write-Host $_ }
+          }
+          throw "msiexec failed with exit code $($msi.ExitCode)."
+        }
+        if ($msi.ExitCode -eq 3010) {
+          Write-Host "msiexec returned 3010 (restart required). Continuing on ephemeral runner."
+        }
+
+    - name: Verify SCP installation
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $found = $false
+        for ($attempt = 1; $attempt -le 4; $attempt++) {
+          $proc = Get-Process -Name "scpservice" -ErrorAction SilentlyContinue
+          if ($proc) {
+            Write-Host "scpservice.exe found post-install on attempt $attempt/4. PID(s): $($proc.Id -join ', ')"
+            "scpservice.exe found post-install on attempt $attempt/4. PID(s): $($proc.Id -join ', ')" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            $found = $true
+            break
+          }
+
+          Write-Host "scpservice.exe not found on verify attempt $attempt/4."
+          "scpservice.exe not found on verify attempt $attempt/4." | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          if ($attempt -lt 4) { Start-Sleep -Seconds 10 }
+        }
+
+        if (-not $found) {
+          throw "SCP installation verification failed: process 'scpservice.exe' not found."
+        }
+
+    - name: Post-install service snapshot
+      shell: pwsh
+      run: |
+        Write-Host "::group::Post-install services"
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue | Format-Table Name,DisplayName,Status,StartType -AutoSize
+        } catch {
+          Write-Host "Post-install service snapshot failed: $($_.Exception.Message)"
+        }
+        Write-Host "::endgroup::"
+        "=== Post-install services ===" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        try {
+          Get-Service -Name "*scp*", "*skyhigh*" -ErrorAction SilentlyContinue |
+            Select-Object Name,DisplayName,Status,StartType | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        } catch {
+          "Post-install service snapshot failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        }
+
+    - name: Check SCP Connection Status
+      id: check_scp
+      timeout-minutes: 2
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $regPath = "HKLM:\SOFTWARE\Skyhigh\SCP\About"
+        $valueName = "Status"
+        $maxAttempts = 25
+        $isConnected = $false
+
+        Write-Host "::group::SCP Connection Diagnostics"
+        Write-Host "Runner: $env:RUNNER_NAME / $env:RUNNER_OS"
+        Write-Host "Registry path: $regPath"
+        "Starting fast multi-attempt SCP status check" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+          $ts = Get-Date -Format o
+          Write-Host "SCP registry read attempt $attempt/$maxAttempts at $ts"
+          "SCP registry read attempt $attempt/$maxAttempts at ${ts}" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          try {
+            $about = Get-ItemProperty -Path $regPath -ErrorAction Stop
+            $aboutText = $about | Format-List * | Out-String
+            Write-Host "SCP About registry dump:"
+            Write-Host $aboutText
+            "SCP About registry dump (attempt $attempt):" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            $aboutText | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+            $status = ""
+            if ($about.PSObject.Properties.Name -contains $valueName) {
+              $status = [string]$about.$valueName
+            }
+            Write-Host "SCP status attempt ${attempt}: '$status'"
+            "SCP status attempt ${attempt}: $status" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+            if ($status -eq "Secure") {
+              $isConnected = $true
+              break
+            }
+          } catch {
+            Write-Host "SCP registry read attempt $attempt failed: $($_.Exception.Message)"
+            "SCP registry read attempt $attempt failed: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          }
+        }
+
+        if ($isConnected) {
+          "is_connected=true" >> $env:GITHUB_OUTPUT
+        } else {
+          "is_connected=false" >> $env:GITHUB_OUTPUT
+          Write-Host "::endgroup::"
+          throw "SCP status did not become Secure after $maxAttempts attempts."
+        }
+        Write-Host "::endgroup::"
+
+    - name: Browser diagnostics
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        Write-Host "::group::Browser Diagnostics"
+        $browserExe = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+        Write-Host "Using browser path: $browserExe"
+        "Selected browser: $browserExe" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "BROWSER_EXE=$browserExe" >> $env:GITHUB_ENV
+        Write-Host "::endgroup::"
+
+    - name: Access top websites from external list
+      if: steps.check_scp.outputs.is_connected == 'true'
+      timeout-minutes: 8
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        if (-not $env:BROWSER_EXE) {
+          throw "BROWSER_EXE environment variable is not set."
+        }
+
+        # Load the list of URLs from the JSON file
+        $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
+
+        # Select 30 random URLs
+        $selected = Get-Random -InputObject $topSites -Count 30
+        $successCount = 0
+        $failureCount = 0
+        $urlIndex = 0
+
+        "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "Browser executable: $env:BROWSER_EXE" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
+        "- SCP status: Secure" >> $env:GITHUB_STEP_SUMMARY
+        "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
+        "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
+
+        # Open each site in Chrome
+        foreach ($site in $selected) {
+          $urlIndex++
+          $ts = Get-Date -Format o
+          try {
+            Start-Process -FilePath $env:BROWSER_EXE -ArgumentList "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site" -ErrorAction Stop | Out-Null
+            $successCount++
+            "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+          } catch {
+            $failureCount++
+            "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
+          }
+        }
+
+        "- URL launch success count: $successCount" >> $env:GITHUB_STEP_SUMMARY
+        "- URL launch failure count: $failureCount" >> $env:GITHUB_STEP_SUMMARY
+        "URL launch success count: $successCount" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+        "URL launch failure count: $failureCount" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+
+        if ($successCount -eq 0) {
+          throw "No URLs were successfully launched."
+        }
+
+    - name: Terminate browser processes
+      if: always()  # Runs even if previous step failed
+      shell: pwsh
+      run: |
+        Get-Process -Name "chrome", "msedge" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    - name: Upload diagnostics artifact
+      if: always()
+      env:
+        NODE_EXTRA_CA_CERTS: ${{ github.workspace }}\CA_MFE_Tenant.pem
+      uses: actions/upload-artifact@v4
+      with:
+        name: scp-diagnostics-nextgen-mcafee-${{ github.run_id }}
+        path: diagnostics/scp-debug.log
+        if-no-files-found: warn
