@@ -1,4 +1,4 @@
-name: SCP Traffic Generation - Skyhigh - NextGen
+name: CURL SCP Traffic Generation - Skyhigh - NextGen
 
 on:
   schedule:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   NextGenSCP-Skyhigh-run:
+    name: CURL NextGenSCP-Skyhigh-run
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -226,26 +227,12 @@ jobs:
         }
         Write-Host "::endgroup::"
 
-    - name: Browser diagnostics
-      shell: pwsh
-      run: |
-        $ErrorActionPreference = "Stop"
-        Write-Host "::group::Browser Diagnostics"
-        $browserExe = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-        Write-Host "Using browser path: $browserExe"
-        "Selected browser: $browserExe" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        "BROWSER_EXE=$browserExe" >> $env:GITHUB_ENV
-        Write-Host "::endgroup::"
-
     - name: Access top websites from external list
       if: steps.check_scp.outputs.is_connected == 'true'
       timeout-minutes: 8
       shell: pwsh
       run: |
         $ErrorActionPreference = "Stop"
-        if (-not $env:BROWSER_EXE) {
-          throw "BROWSER_EXE environment variable is not set."
-        }
 
         # Load the list of URLs from the JSON file
         $topSites = Get-Content "top-sites.json" | ConvertFrom-Json
@@ -258,24 +245,25 @@ jobs:
 
         "Selected URL count: $($selected.Count)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "First 5 URLs: $((($selected | Select-Object -First 5) -join ', '))" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-        "Browser executable: $env:BROWSER_EXE" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
         "### SCP Traffic Summary" >> $env:GITHUB_STEP_SUMMARY
         "- SCP status: Secure" >> $env:GITHUB_STEP_SUMMARY
         "- Selected URL count: $($selected.Count)" >> $env:GITHUB_STEP_SUMMARY
-        "- Browser executable: $env:BROWSER_EXE" >> $env:GITHUB_STEP_SUMMARY
+        "- Traffic mode: CURL" >> $env:GITHUB_STEP_SUMMARY
 
-        # Open each site in Chrome
+        # Call each site via curl/Invoke-WebRequest
         foreach ($site in $selected) {
           $urlIndex++
           $ts = Get-Date -Format o
           try {
-            Start-Process -FilePath $env:BROWSER_EXE -ArgumentList "--headless=new --disable-gpu --no-sandbox --window-size=1920,1080 --remote-allow-origins=* $site" -ErrorAction Stop | Out-Null
+            $resp = Invoke-WebRequest -Uri $site -Method Get -TimeoutSec 20 -MaximumRedirection 5
+            $statusCode = [int]$resp.StatusCode
             $successCount++
-            "[$ts] URL $urlIndex/$($selected.Count) launched OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
+            Write-Host "URL $urlIndex/$($selected.Count) HTTP $statusCode: $site"
+            "[$ts] URL $urlIndex/$($selected.Count) HTTP $statusCode OK: $site" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
           } catch {
             $failureCount++
+            Write-Host "URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)"
             "[$ts] URL $urlIndex/$($selected.Count) FAILED: $site :: $($_.Exception.Message)" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
-            Write-Host "URL launch failed: $site :: $($_.Exception.Message)"
           }
         }
 
@@ -285,14 +273,8 @@ jobs:
         "URL launch failure count: $failureCount" | Out-File -FilePath diagnostics/scp-debug.log -Append -Encoding utf8
 
         if ($successCount -eq 0) {
-          throw "No URLs were successfully launched."
+          throw "No URL requests succeeded."
         }
-
-    - name: Terminate browser processes
-      if: always()  # Runs even if previous step failed
-      shell: pwsh
-      run: |
-        Get-Process -Name "chrome", "msedge" -ErrorAction SilentlyContinue | Stop-Process -Force
 
     - name: Upload diagnostics artifact
       if: always()
