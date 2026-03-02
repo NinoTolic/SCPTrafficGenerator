@@ -10,6 +10,9 @@ jobs:
     name: CURL NextGenSCP-McAfee-run
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      ACTIONS_STEP_DEBUG: "true"
+      ACTIONS_RUNNER_DEBUG: "true"
 
     steps:
     - name: Checkout repository
@@ -177,7 +180,6 @@ jobs:
       timeout-minutes: 3
       shell: pwsh
       run: |
-        Write-Host "Waiting 2 minutes before SCP status check..."
         Start-Sleep -Seconds 120
 
     - name: Check SCP Connection Status
