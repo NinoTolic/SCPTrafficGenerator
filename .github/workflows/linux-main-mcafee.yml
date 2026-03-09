@@ -160,7 +160,7 @@ jobs:
           if [[ ! -f "$status_file" ]]; then
             echo "Status file not found: $status_file" | tee -a diagnostics/scp-debug.log
           else
-            status_list="$(jq -r '.webGateway.gateways[]?.Status // empty' "$status_file" 2>/dev/null || true)"
+            status_list="$(jq -r '.webGateways.gateways[]?.Status // empty' "$status_file" 2>/dev/null || true)"
             status="$(printf '%s\n' "$status_list" | head -n 1)"
             echo "scp-status.json gateway statuses: ${status_list:-<none>}" | tee -a diagnostics/scp-debug.log
             if printf '%s\n' "$status_list" | grep -Fxq "Connected"; then
