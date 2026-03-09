@@ -1,0 +1,225 @@
+name: LINUX SCP Traffic Generation - Skyhigh
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  linux-scp-skyhigh-run:
+    name: LINUX-SCP-Skyhigh-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      INSTALLER_ARCHIVE_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/EA_Pkg.7z
+      POLICY_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/scp-policy-skyhigh-oldgen.opg
+      CA_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/CA_Skyhigh.pem
+      POLICY_FILE: scp-policy-skyhigh-oldgen.opg
+      CA_FILE: CA_Skyhigh.pem
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize diagnostics
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p diagnostics
+        {
+          echo "Workflow: $GITHUB_WORKFLOW"
+          echo "Run ID: $GITHUB_RUN_ID"
+          echo "Runner: $RUNNER_NAME / $RUNNER_OS"
+          echo "Timestamp: $(date -Iseconds)"
+        } > diagnostics/scp-debug.log
+
+    - name: Install Linux prerequisites
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y p7zip-full libnss3-tools jq curl ca-certificates
+
+    - name: Copy files from private repo
+      shell: bash
+      env:
+        PAT: ${{ secrets.NewSCPToken }}
+      run: |
+        set -euo pipefail
+        auth_header="Authorization: token ${PAT}"
+        curl -fsSL -H "$auth_header" "$INSTALLER_ARCHIVE_URL" -o EA_Pkg.7z
+        curl -fsSL -H "$auth_header" "$POLICY_URL" -o "$POLICY_FILE"
+        curl -fsSL -H "$auth_header" "$CA_URL" -o "$CA_FILE"
+
+        {
+          echo "=== Downloaded files ==="
+          ls -lh EA_Pkg.7z "$POLICY_FILE" "$CA_FILE"
+          sha256sum EA_Pkg.7z "$POLICY_FILE" "$CA_FILE"
+        } | tee -a diagnostics/scp-debug.log
+
+    - name: Deploy OPG policy (Linux path)
+      shell: bash
+      run: |
+        set -euo pipefail
+        policy_dir="/usr/local/Skyhigh/SC"
+        policy_path="$policy_dir/scppolicy.opg"
+        sudo mkdir -p "$policy_dir"
+        sudo cp -f "$POLICY_FILE" "$policy_path"
+        echo "Policy copied to $policy_path" | tee -a diagnostics/scp-debug.log
+
+    - name: Add certificate to system and NSS trust stores
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        cert_src="$CA_FILE"
+        cert_name="scp-root-ca"
+
+        # System trust
+        sudo cp -f "$cert_src" "/usr/local/share/ca-certificates/${cert_name}.crt"
+        sudo update-ca-certificates
+        echo "System trust store updated with $cert_name" | tee -a diagnostics/scp-debug.log
+
+        # Chrome/Chromium NSS DB trust (shared user DB)
+        mkdir -p "$HOME/.pki/nssdb"
+        certutil -d sql:"$HOME/.pki/nssdb" -N --empty-password || true
+        certutil -d sql:"$HOME/.pki/nssdb" -A -n "$cert_name" -t "C,," -i "$cert_src" || true
+        certutil -d sql:"$HOME/.pki/nssdb" -L | tee -a diagnostics/scp-debug.log
+
+        # Firefox NSS DB trust (all discovered profiles, or fallback db)
+        if compgen -G "$HOME/.mozilla/firefox/*.default*" > /dev/null; then
+          for profile in "$HOME"/.mozilla/firefox/*.default*; do
+            certutil -d sql:"$profile" -A -n "$cert_name" -t "C,," -i "$cert_src" || true
+            echo "Imported cert into Firefox profile: $profile" | tee -a diagnostics/scp-debug.log
+          done
+        else
+          mkdir -p "$HOME/.mozilla/firefox/scp-ci-profile"
+          certutil -d sql:"$HOME/.mozilla/firefox/scp-ci-profile" -N --empty-password || true
+          certutil -d sql:"$HOME/.mozilla/firefox/scp-ci-profile" -A -n "$cert_name" -t "C,," -i "$cert_src" || true
+          echo "Created/imported cert into fallback Firefox NSS DB" | tee -a diagnostics/scp-debug.log
+        fi
+
+        {
+          echo "### Certificate Trust Summary"
+          echo "- System trust: updated"
+          echo "- Chrome NSS DB: attempted"
+          echo "- Firefox NSS DB: attempted"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Extract installer archive
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf ea_pkg
+        mkdir -p ea_pkg
+        7z x EA_Pkg.7z -oea_pkg
+        echo "Extracted EA_Pkg.7z into ./ea_pkg" | tee -a diagnostics/scp-debug.log
+
+    - name: Install Linux SCP with sc_install.sh
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        install_script="$(find ea_pkg -type f -name sc_install.sh | head -n 1)"
+        if [[ -z "$install_script" ]]; then
+          echo "sc_install.sh not found under extracted archive." | tee -a diagnostics/scp-debug.log
+          exit 1
+        fi
+
+        chmod +x "$install_script"
+        echo "Running install script: $install_script" | tee -a diagnostics/scp-debug.log
+        script_dir="$(dirname "$install_script")"
+        (
+          cd "$script_dir"
+          sudo bash ./sc_install.sh
+        )
+        echo "sc_install.sh finished successfully" | tee -a diagnostics/scp-debug.log
+
+    - name: Check SCP install status (sc-interceptd.service)
+      id: check_scp
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if ! systemctl list-unit-files | grep -q '^sc-interceptd.service'; then
+          echo "sc-interceptd.service not found." | tee -a diagnostics/scp-debug.log
+          echo "is_connected=false" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        active="$(systemctl is-active sc-interceptd.service || true)"
+        echo "sc-interceptd.service state: $active" | tee -a diagnostics/scp-debug.log
+        sudo systemctl status sc-interceptd.service --no-pager || true
+
+        if [[ "$active" == "active" ]]; then
+          echo "is_connected=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_connected=false" >> "$GITHUB_OUTPUT"
+          echo "sc-interceptd.service is not active." | tee -a diagnostics/scp-debug.log
+          exit 1
+        fi
+
+    - name: Access top websites from external list
+      if: steps.check_scp.outputs.is_connected == 'true'
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        mapfile -t selected < <(jq -r '.[]' top-sites.json | shuf -n 30)
+        success_count=0
+        failure_count=0
+        url_index=0
+
+        {
+          echo "Selected URL count: ${#selected[@]}"
+          echo "First 5 URLs: $(printf '%s\n' "${selected[@]}" | head -n 5 | paste -sd ', ' -)"
+        } | tee -a diagnostics/scp-debug.log
+
+        {
+          echo "### SCP Traffic Summary"
+          echo "- SCP install status: sc-interceptd.service active"
+          echo "- Selected URL count: ${#selected[@]}"
+          echo "- Traffic mode: curl"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        for site in "${selected[@]}"; do
+          url_index=$((url_index + 1))
+          ts="$(date -Iseconds)"
+          code="$(curl -L --max-time 20 -sS -o /dev/null -w '%{http_code}' "$site" || echo 000)"
+
+          if [[ "$code" =~ ^[0-9]+$ ]] && [[ "$code" -ge 200 ]] && [[ "$code" -lt 600 ]]; then
+            success_count=$((success_count + 1))
+            echo "URL ${url_index}/${#selected[@]} HTTP ${code}: $site"
+            echo "[$ts] URL ${url_index}/${#selected[@]} HTTP ${code}: $site" >> diagnostics/scp-debug.log
+          else
+            failure_count=$((failure_count + 1))
+            echo "URL ${url_index}/${#selected[@]} FAILED (code=$code): $site"
+            echo "[$ts] URL ${url_index}/${#selected[@]} FAILED (code=$code): $site" >> diagnostics/scp-debug.log
+          fi
+        done
+
+        {
+          echo "- URL request success count: $success_count"
+          echo "- URL request failure count: $failure_count"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        echo "URL request success count: $success_count" | tee -a diagnostics/scp-debug.log
+        echo "URL request failure count: $failure_count" | tee -a diagnostics/scp-debug.log
+
+        if [[ "$success_count" -eq 0 ]]; then
+          echo "No URL requests succeeded." | tee -a diagnostics/scp-debug.log
+          exit 1
+        fi
+
+    - name: Upload diagnostics artifact
+      if: always()
+      env:
+        NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/CA_Skyhigh.pem
+      uses: actions/upload-artifact@v4
+      with:
+        name: scp-diagnostics-linux-skyhigh-${{ github.run_id }}
+        path: diagnostics/scp-debug.log
+        if-no-files-found: warn
