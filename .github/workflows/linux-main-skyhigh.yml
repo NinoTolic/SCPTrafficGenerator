@@ -131,7 +131,7 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
-        policy_dir="/usr/local/Skyhigh/SC"
+        policy_dir="/usr/local/Skyhigh/SC/policy"
         policy_path="$policy_dir/scppolicy.opg"
         sudo mkdir -p "$policy_dir"
         sudo cp -f "$POLICY_FILE" "$policy_path"
