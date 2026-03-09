@@ -58,16 +58,6 @@ jobs:
           sha256sum EA_Pkg.7z "$POLICY_FILE" "$CA_FILE"
         } | tee -a diagnostics/scp-debug.log
 
-    - name: Deploy OPG policy (Linux path)
-      shell: bash
-      run: |
-        set -euo pipefail
-        policy_dir="/usr/local/Skyhigh/SC"
-        policy_path="$policy_dir/scppolicy.opg"
-        sudo mkdir -p "$policy_dir"
-        sudo cp -f "$POLICY_FILE" "$policy_path"
-        echo "Policy copied to $policy_path" | tee -a diagnostics/scp-debug.log
-
     - name: Add certificate to system and NSS trust stores
       shell: bash
       run: |
@@ -136,6 +126,16 @@ jobs:
           sudo bash ./sc_install.sh
         )
         echo "sc_install.sh finished successfully" | tee -a diagnostics/scp-debug.log
+
+    - name: Deploy OPG policy (Linux path)
+      shell: bash
+      run: |
+        set -euo pipefail
+        policy_dir="/usr/local/Skyhigh/SC"
+        policy_path="$policy_dir/scppolicy.opg"
+        sudo mkdir -p "$policy_dir"
+        sudo cp -f "$POLICY_FILE" "$policy_path"
+        echo "Policy copied to $policy_path" | tee -a diagnostics/scp-debug.log
 
     - name: Wait before SCP service check
       shell: bash
