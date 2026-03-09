@@ -13,9 +13,9 @@ jobs:
 
     env:
       INSTALLER_ARCHIVE_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/EA_Pkg.7z
-      POLICY_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/scp-policy-skyhigh-oldgen.opg
+      POLICY_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/scp-policy-skyhigh-oldgen-policy-158.opg
       CA_URL: https://raw.githubusercontent.com/NinoTolic/SCPTesterFiles/main/SkyhighTenant/CA_Skyhigh.pem
-      POLICY_FILE: scp-policy-skyhigh-oldgen.opg
+      POLICY_FILE: scp-policy-skyhigh-oldgen-policy-158.opg
       CA_FILE: CA_Skyhigh.pem
 
     steps:
