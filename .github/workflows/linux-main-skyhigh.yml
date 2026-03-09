@@ -143,27 +143,42 @@ jobs:
         set -euo pipefail
         sleep 30
 
-    - name: Check SCP install status (sc-agentd.service)
+    - name: Check SCP connection status (scp-status.json)
       id: check_scp
       shell: bash
       run: |
         set -euo pipefail
 
-        if ! systemctl list-unit-files | grep -q '^sc-agentd.service'; then
-          echo "sc-agentd.service not found." | tee -a diagnostics/scp-debug.log
-          echo "is_connected=false" >> "$GITHUB_OUTPUT"
-          exit 1
-        fi
+        status_file="/usr/local/Skyhigh/SC/var/scp-status.json"
+        max_attempts=4
+        wait_seconds=10
+        connected=false
 
-        active="$(systemctl is-active sc-agentd.service || true)"
-        echo "sc-agentd.service state: $active" | tee -a diagnostics/scp-debug.log
-        sudo systemctl status sc-agentd.service --no-pager || true
+        for attempt in $(seq 1 "$max_attempts"); do
+          echo "SCP status check attempt ${attempt}/${max_attempts}" | tee -a diagnostics/scp-debug.log
 
-        if [[ "$active" == "active" ]]; then
+          if [[ ! -f "$status_file" ]]; then
+            echo "Status file not found: $status_file" | tee -a diagnostics/scp-debug.log
+          else
+            status="$(jq -r '.Status // empty' "$status_file" 2>/dev/null || true)"
+            echo "scp-status.json Status='${status}'" | tee -a diagnostics/scp-debug.log
+            if [[ "$status" == "Connected" ]]; then
+              connected=true
+              break
+            fi
+          fi
+
+          if [[ "$attempt" -lt "$max_attempts" ]]; then
+            echo "Status is not Connected yet. Waiting ${wait_seconds}s before retry." | tee -a diagnostics/scp-debug.log
+            sleep "$wait_seconds"
+          fi
+        done
+
+        if [[ "$connected" == "true" ]]; then
           echo "is_connected=true" >> "$GITHUB_OUTPUT"
         else
           echo "is_connected=false" >> "$GITHUB_OUTPUT"
-          echo "sc-agentd.service is not active." | tee -a diagnostics/scp-debug.log
+          echo "SCP did not report Connected status after ${max_attempts} attempts." | tee -a diagnostics/scp-debug.log
           exit 1
         fi
 
@@ -186,7 +201,7 @@ jobs:
 
         {
           echo "### SCP Traffic Summary"
-          echo "- SCP install status: sc-agentd.service active"
+          echo "- SCP status: Connected"
           echo "- Selected URL count: ${#selected[@]}"
           echo "- Traffic mode: curl"
         } >> "$GITHUB_STEP_SUMMARY"
