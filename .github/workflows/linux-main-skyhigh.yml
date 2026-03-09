@@ -143,27 +143,27 @@ jobs:
         set -euo pipefail
         sleep 30
 
-    - name: Check SCP install status (sc-interceptd.service)
+    - name: Check SCP install status (sc_agentd.service)
       id: check_scp
       shell: bash
       run: |
         set -euo pipefail
 
-        if ! systemctl list-unit-files | grep -q '^sc-interceptd.service'; then
-          echo "sc-interceptd.service not found." | tee -a diagnostics/scp-debug.log
+        if ! systemctl list-unit-files | grep -q '^sc_agentd.service'; then
+          echo "sc_agentd.service not found." | tee -a diagnostics/scp-debug.log
           echo "is_connected=false" >> "$GITHUB_OUTPUT"
           exit 1
         fi
 
-        active="$(systemctl is-active sc-interceptd.service || true)"
-        echo "sc-interceptd.service state: $active" | tee -a diagnostics/scp-debug.log
-        sudo systemctl status sc-interceptd.service --no-pager || true
+        active="$(systemctl is-active sc_agentd.service || true)"
+        echo "sc_agentd.service state: $active" | tee -a diagnostics/scp-debug.log
+        sudo systemctl status sc_agentd.service --no-pager || true
 
         if [[ "$active" == "active" ]]; then
           echo "is_connected=true" >> "$GITHUB_OUTPUT"
         else
           echo "is_connected=false" >> "$GITHUB_OUTPUT"
-          echo "sc-interceptd.service is not active." | tee -a diagnostics/scp-debug.log
+          echo "sc_agentd.service is not active." | tee -a diagnostics/scp-debug.log
           exit 1
         fi
 
@@ -186,7 +186,7 @@ jobs:
 
         {
           echo "### SCP Traffic Summary"
-          echo "- SCP install status: sc-interceptd.service active"
+          echo "- SCP install status: sc_agentd.service active"
           echo "- Selected URL count: ${#selected[@]}"
           echo "- Traffic mode: curl"
         } >> "$GITHUB_STEP_SUMMARY"
