@@ -137,6 +137,12 @@ jobs:
         )
         echo "sc_install.sh finished successfully" | tee -a diagnostics/scp-debug.log
 
+    - name: Wait before SCP service check
+      shell: bash
+      run: |
+        set -euo pipefail
+        sleep 30
+
     - name: Check SCP install status (sc-interceptd.service)
       id: check_scp
       shell: bash
