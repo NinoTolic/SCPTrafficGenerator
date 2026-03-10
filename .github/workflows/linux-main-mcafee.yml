@@ -183,6 +183,18 @@ jobs:
           exit 1
         fi
 
+    - name: Ensure linuxrunner user exists
+      if: steps.check_scp.outputs.is_connected == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if id -u linuxrunner >/dev/null 2>&1; then
+          echo "User linuxrunner already exists." | tee -a diagnostics/scp-debug.log
+        else
+          sudo useradd -m -s /bin/bash linuxrunner
+          echo "Created user linuxrunner." | tee -a diagnostics/scp-debug.log
+        fi
+
     - name: Access top websites from external list
       if: steps.check_scp.outputs.is_connected == 'true'
       timeout-minutes: 10
@@ -190,7 +202,16 @@ jobs:
       run: |
         set -euo pipefail
 
-        mapfile -t selected < <(jq -r '.[]' top-sites.json | shuf -n 30)
+        mapfile -t all_sites < <(jq -r '.[]' top-sites.json)
+        if [[ "${#all_sites[@]}" -lt 11 ]]; then
+          echo "top-sites.json must contain at least 11 URLs." | tee -a diagnostics/scp-debug.log
+          exit 1
+        fi
+
+        mapfile -t first_ten < <(printf '%s\n' "${all_sites[@]}" | head -n 10)
+        mapfile -t random_thirty < <(printf '%s\n' "${all_sites[@]}" | tail -n +11 | shuf -n 30)
+        selected=("${first_ten[@]}" "${random_thirty[@]}")
+
         success_count=0
         failure_count=0
         url_index=0
@@ -210,7 +231,7 @@ jobs:
         for site in "${selected[@]}"; do
           url_index=$((url_index + 1))
           ts="$(date -Iseconds)"
-          code="$(curl -L --max-time 20 -sS -o /dev/null -w '%{http_code}' "$site" || echo 000)"
+          code="$(sudo -u linuxrunner -- curl -L --max-time 20 -sS -o /dev/null -w '%{http_code}' "$site" || echo 000)"
 
           if [[ "$code" =~ ^[0-9]+$ ]] && [[ "$code" -ge 200 ]] && [[ "$code" -lt 600 ]]; then
             success_count=$((success_count + 1))
