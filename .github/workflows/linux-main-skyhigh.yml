@@ -231,16 +231,40 @@ jobs:
         for site in "${selected[@]}"; do
           url_index=$((url_index + 1))
           ts="$(date -Iseconds)"
-          code="$(sudo -u linuxrunner -- curl -L --max-time 20 -sS -o /dev/null -w '%{http_code}' "$site" || echo 000)"
+          headers="$(sudo -u linuxrunner -- curl -L --max-time 20 -sS -D - -o /dev/null "$site" || true)"
+          code="$(printf '%s\n' "$headers" | awk '/^HTTP\// { code=$2 } END { print code }')"
+          status_text="$(printf '%s\n' "$headers" | awk '/^HTTP\// { $1=\"\"; $2=\"\"; sub(/^ +/, \"\"); txt=$0 } END { print txt }')"
+
+          if [[ -z "$status_text" ]]; then
+            case "$code" in
+              200) status_text="OK" ;;
+              301) status_text="Moved Permanently" ;;
+              302) status_text="Found" ;;
+              400) status_text="Bad Request" ;;
+              401) status_text="Unauthorized" ;;
+              403) status_text="Forbidden" ;;
+              404) status_text="Not Found" ;;
+              429) status_text="Too Many Requests" ;;
+              500) status_text="Internal Server Error" ;;
+              502) status_text="Bad Gateway" ;;
+              503) status_text="Service Unavailable" ;;
+              504) status_text="Gateway Timeout" ;;
+              *) status_text="Unknown" ;;
+            esac
+          fi
+          if [[ -z "$code" ]]; then
+            code="000"
+            status_text="CurlFailed"
+          fi
 
           if [[ "$code" =~ ^[0-9]+$ ]] && [[ "$code" -ge 200 ]] && [[ "$code" -lt 600 ]]; then
             success_count=$((success_count + 1))
-            echo "URL ${url_index}/${#selected[@]} HTTP ${code}: $site"
-            echo "[$ts] URL ${url_index}/${#selected[@]} HTTP ${code}: $site" >> diagnostics/scp-debug.log
+            echo "URL ${url_index}/${#selected[@]} HTTP ${code} ${status_text}: $site"
+            echo "[$ts] URL ${url_index}/${#selected[@]} HTTP ${code} ${status_text}: $site" >> diagnostics/scp-debug.log
           else
             failure_count=$((failure_count + 1))
-            echo "URL ${url_index}/${#selected[@]} FAILED (code=$code): $site"
-            echo "[$ts] URL ${url_index}/${#selected[@]} FAILED (code=$code): $site" >> diagnostics/scp-debug.log
+            echo "URL ${url_index}/${#selected[@]} FAILED (code=$code, text=${status_text}): $site"
+            echo "[$ts] URL ${url_index}/${#selected[@]} FAILED (code=$code, text=${status_text}): $site" >> diagnostics/scp-debug.log
           fi
         done
 
